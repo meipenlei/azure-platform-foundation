@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate configuration schemas and examples
+    name: Validate APF schemas and configuration
     runs-on: ubuntu-latest
 
     steps:
@@ -39,7 +39,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r tooling/validate-config/requirements.txt
 
-      - name: Validate minimal Greenfield example
+      - name: Validate JSON Schema definitions
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+
+          schema_dir = Path("config/schema")
+
+          schemas = sorted(schema_dir.glob("*.schema.json"))
+
+          if not schemas:
+              raise SystemExit("No schema files found.")
+
+          print("Azure Platform Foundation schema validation")
+          print("-------------------------------------------")
+
+          for schema_path in schemas:
+              with schema_path.open("r", encoding="utf-8") as f:
+                  schema = json.load(f)
+
+              Draft202012Validator.check_schema(schema)
+
+              print(f"[PASS] {schema_path.name}")
+
+          print()
+          print("All JSON Schema definitions are valid.")
+          PY
+
+      - name: Validate minimal Greenfield configuration
         run: |
           python tooling/validate-config/validate.py \
             --config-dir config/examples/greenfield-minimal \
