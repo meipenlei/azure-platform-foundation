@@ -1,0 +1,46 @@
+name: Validate APF Configuration
+
+on:
+  pull_request:
+    paths:
+      - "config/**"
+      - "tooling/validate-config/**"
+      - ".github/workflows/validate-config.yml"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "config/**"
+      - "tooling/validate-config/**"
+      - ".github/workflows/validate-config.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate configuration schemas and examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: tooling/validate-config/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tooling/validate-config/requirements.txt
+
+      - name: Validate minimal Greenfield example
+        run: |
+          python tooling/validate-config/validate.py \
+            --config-dir config/examples/greenfield-minimal \
+            --schema-dir config/schema
