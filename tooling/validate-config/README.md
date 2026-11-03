@@ -110,11 +110,11 @@ This makes the validator suitable for use as a CI/CD quality gate.
 
 ## Exit Codes
 
-| Code | Meaning |
-|---:|---|
-| 0 | Configuration is valid |
-| 1 | Configuration violates an APF schema |
-| 2 | Validation could not be performed |
+|Code|Meaning|
+|---|---|
+|0|Configuration is valid|
+|1|Configuration violates an APF schema|
+|2|Validation could not be performed|
 
 ## Design Principle
 
