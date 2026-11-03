@@ -1,0 +1,21 @@
+schema_version: "0.1"
+
+deployment:
+  mode: "greenfield"
+
+iac:
+  engine: "terraform"
+
+execution:
+  provider: "github"
+
+  github:
+    owner: "example-organization"
+    repository: "customer-azure-platform"
+
+naming:
+  prefix: "apflab"
+
+security:
+  authentication: "workload-identity-federation"
+  allow_long_lived_credentials: false

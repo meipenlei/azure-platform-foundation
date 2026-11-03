@@ -1,0 +1,11 @@
+schema_version: "0.1"
+
+customer:
+  id: "apf-lab"
+  display_name: "APF Reference Environment"
+
+azure:
+  tenant_id: "00000000-0000-0000-0000-000000000000"
+  bootstrap_subscription_id: "00000000-0000-0000-0000-000000000000"
+  cloud: "public"
+  primary_region: "germanywestcentral"
