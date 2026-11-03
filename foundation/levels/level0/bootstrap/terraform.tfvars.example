@@ -1,0 +1,17 @@
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+location    = "germanywestcentral"
+name_prefix = "apflab"
+
+github_owner         = "example-owner"
+github_owner_id      = "12345678"
+
+github_repository    = "customer-azure-platform"
+github_repository_id = "87654321"
+
+github_apply_environment = "apf-level0"
+
+tags = {
+  environment = "bootstrap"
+}
