@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:apf:schema:customer:0.1",
+  "title": "Azure Platform Foundation Customer Configuration",
+  "description": "Defines customer metadata and the Azure target context for an Azure Platform Foundation implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "customer",
+    "azure"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "Version of this configuration schema."
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$",
+          "description": "Stable machine-readable customer identifier."
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Human-readable customer or organization name."
+        }
+      }
+    },
+    "azure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_id",
+        "bootstrap_subscription_id",
+        "cloud",
+        "primary_region"
+      ],
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Microsoft Entra tenant ID."
+        },
+        "bootstrap_subscription_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Azure subscription used to establish Level 0."
+        },
+        "cloud": {
+          "type": "string",
+          "enum": [
+            "public",
+            "usgovernment",
+            "china"
+          ],
+          "description": "Azure cloud environment."
+        },
+        "primary_region": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+$",
+          "description": "Primary Azure region using its canonical Azure name, for example germanywestcentral."
+        }
+      }
+    }
+  }
+}

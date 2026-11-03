@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:apf:schema:platform:0.1",
+  "title": "Azure Platform Foundation Platform Configuration",
+  "description": "Defines deployment mode, Infrastructure-as-Code engine, execution provider, naming, and authentication requirements.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "deployment",
+    "iac",
+    "execution",
+    "naming",
+    "security"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "Version of this configuration schema."
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "greenfield",
+            "brownfield"
+          ],
+          "description": "Defines whether APF creates a new platform or adopts an existing Azure environment."
+        }
+      }
+    },
+    "iac": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine"
+      ],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "const": "terraform",
+          "description": "Infrastructure-as-Code engine. Terraform is the initial APF implementation."
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "azure-devops"
+          ],
+          "description": "CI/CD execution provider."
+        },
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "repository"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string",
+              "minLength": 1,
+              "description": "GitHub organization or account owning the customer repository."
+            },
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "description": "GitHub customer implementation repository."
+            }
+          }
+        },
+        "azure_devops": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "organization",
+            "project",
+            "repository"
+          ],
+          "properties": {
+            "organization": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Azure DevOps organization."
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Azure DevOps project."
+            },
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Azure DevOps customer implementation repository."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "github"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "required": [
+              "github"
+            ],
+            "not": {
+              "required": [
+                "azure_devops"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "azure-devops"
+              }
+            },
+            "required": [
+              "provider"
+            ]
+          },
+          "then": {
+            "required": [
+              "azure_devops"
+            ],
+            "not": {
+              "required": [
+                "github"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "naming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prefix"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 10,
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+          "description": "Short customer or platform prefix used as input to resource naming."
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authentication",
+        "allow_long_lived_credentials"
+      ],
+      "properties": {
+        "authentication": {
+          "type": "string",
+          "const": "workload-identity-federation",
+          "description": "Authentication mechanism for normal platform deployment."
+        },
+        "allow_long_lived_credentials": {
+          "type": "boolean",
+          "const": false,
+          "description": "APF v0.1 does not permit long-lived Azure deployment credentials."
+        }
+      }
+    }
+  }
+}
