@@ -21,6 +21,7 @@ resource "azurerm_storage_account" "state" {
 
   shared_access_key_enabled       = false
   default_to_oauth_authentication = true
+  local_user_enabled              = false
 
   blob_properties {
     versioning_enabled = true
