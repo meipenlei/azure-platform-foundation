@@ -96,8 +96,3 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
-
-variable "bootstrap_principal_id" {
-  description = "Object ID of the principal used for the initial APF bootstrap."
-  type        = string
-}

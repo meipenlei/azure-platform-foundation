@@ -1,11 +1,3 @@
-resource "azurerm_role_assignment" "bootstrap_state" {
-  scope = azurerm_storage_container.tfstate.id
-
-  role_definition_name = "Storage Blob Data Contributor"
-
-  principal_id = var.bootstrap_principal_id
-}
-
 resource "azurerm_role_assignment" "plan_state" {
   scope = azurerm_storage_container.tfstate.id
 
