@@ -3,7 +3,7 @@ resource "azurerm_role_assignment" "bootstrap_state" {
 
   role_definition_name = "Storage Blob Data Contributor"
 
-  principal_id = data.azurerm_client_config.current.object_id
+  principal_id = var.bootstrap_principal_id
 }
 
 resource "azurerm_role_assignment" "plan_state" {
