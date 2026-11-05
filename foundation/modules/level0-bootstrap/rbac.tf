@@ -29,3 +29,19 @@ resource "azurerm_role_assignment" "apply_subscription_contributor" {
 
   principal_id = azurerm_user_assigned_identity.apply.principal_id
 }
+
+resource "azurerm_role_assignment" "governance_subscription_rbac_admin" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Role Based Access Control Administrator"
+  principal_id         = azurerm_user_assigned_identity.governance.principal_id
+
+  skip_service_principal_aad_check = true
+}
+
+resource "azurerm_role_assignment" "governance_state" {
+  scope                = azurerm_storage_container.tfstate.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.governance.principal_id
+
+  skip_service_principal_aad_check = true
+}
