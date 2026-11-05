@@ -1,0 +1,7 @@
+module "governance" {
+  source = "git::https://github.com/meipenlei/azure-platform-foundation.git//foundation/modules/level0-governance?ref=[[ foundation_ref ]]"
+
+  subscription_id         = var.subscription_id
+  governance_principal_id = var.governance_principal_id
+  state_container_id      = var.state_container_id
+}

@@ -13,7 +13,8 @@ Current implementation:
 - discovers immutable GitHub owner/repository IDs
 - writes APF discovery metadata
 - generates the Level 0 bootstrap Terraform root
-- generates deterministic Terraform input values
+- generates the Level 0 governance Terraform root
+- generates deterministic Terraform bootstrap input values
 
 Example:
 
@@ -57,7 +58,6 @@ CONFIG_FILES = (
 # Argument handling
 # ---------------------------------------------------------------------------
 
-
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Initialize an Azure Platform Foundation customer project."
@@ -91,12 +91,10 @@ def parse_arguments() -> argparse.Namespace:
 # Configuration loading and validation
 # ---------------------------------------------------------------------------
 
-
 def load_yaml(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as file:
             data = yaml.safe_load(file)
-
     except (OSError, yaml.YAMLError) as exc:
         raise RuntimeError(
             f"Unable to read configuration '{path}': {exc}"
@@ -115,12 +113,7 @@ def validate_configuration(
     config_dir: Path,
     schema_dir: Path,
 ) -> int:
-    validator = (
-        repo_root
-        / "tooling"
-        / "validate-config"
-        / "validate.py"
-    )
+    validator = repo_root / "tooling" / "validate-config" / "validate.py"
 
     if not validator.is_file():
         print(
@@ -151,15 +144,12 @@ def validate_configuration(
 # Jinja template handling
 # ---------------------------------------------------------------------------
 
-
 def create_template_environment() -> Environment:
     """
     Create the Jinja environment used for generated customer files.
 
-    [[ ... ]] is deliberately used instead of {{ ... }} so future GitHub
-    Actions templates can safely contain expressions such as:
-
-        ${{ secrets.AZURE_TENANT_ID }}
+    [[ ... ]] is deliberately used instead of Jinja's default delimiters so
+    future GitHub Actions templates can safely contain GitHub expressions.
     """
 
     return Environment(
@@ -195,7 +185,6 @@ def render_template(
 # GitHub discovery
 # ---------------------------------------------------------------------------
 
-
 def discover_github_repository(
     owner: str,
     repository: str,
@@ -203,10 +192,8 @@ def discover_github_repository(
     """
     Resolve immutable GitHub owner and repository IDs.
 
-    APF uses immutable GitHub identity information when constructing the
-    OIDC federation subjects used by Azure workload identity federation.
-
-    The target GitHub repository must already exist.
+    The target repository must already exist because APF uses its immutable
+    owner/repository IDs when constructing GitHub OIDC federation subjects.
     """
 
     if shutil.which("gh") is None:
@@ -230,8 +217,7 @@ def discover_github_repository(
         error_message = result.stderr.strip()
 
         raise RuntimeError(
-            f"Unable to discover GitHub repository "
-            f"'{owner}/{repository}'. "
+            f"Unable to discover GitHub repository '{owner}/{repository}'. "
             "Verify that the repository exists and that 'gh' is "
             f"authenticated.\n{error_message}"
         )
@@ -253,7 +239,6 @@ def discover_github_repository(
         owner_id = payload["owner"]["id"]
         repository_name = payload["name"]
         repository_id = payload["id"]
-
     except (KeyError, TypeError) as exc:
         raise RuntimeError(
             "GitHub repository response does not contain the "
@@ -272,7 +257,6 @@ def discover_github_repository(
 # Output directory and repository structure
 # ---------------------------------------------------------------------------
 
-
 def ensure_output_directory_available(
     output_dir: Path,
 ) -> None:
@@ -283,17 +267,18 @@ def ensure_output_directory_available(
     if output_dir.exists():
         if not output_dir.is_dir():
             raise RuntimeError(
-                f"Output path exists and is not a directory: "
-                f"{output_dir}"
+                f"Output path exists and is not a directory: {output_dir}"
             )
 
         if any(output_dir.iterdir()):
             raise RuntimeError(
                 f"Output directory is not empty: {output_dir}"
             )
-
     else:
-        output_dir.mkdir(parents=True)
+        output_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
 
 def create_directory_structure(
@@ -334,7 +319,6 @@ def create_directory_structure(
 # Customer configuration
 # ---------------------------------------------------------------------------
 
-
 def copy_configuration(
     config_dir: Path,
     output_dir: Path,
@@ -355,7 +339,6 @@ def copy_configuration(
 # APF metadata
 # ---------------------------------------------------------------------------
 
-
 def write_discovery_file(
     output_dir: Path,
     github: dict[str, str],
@@ -371,11 +354,7 @@ def write_discovery_file(
         "github": github,
     }
 
-    target = (
-        output_dir
-        / ".foundation"
-        / "discovery.yaml"
-    )
+    target = output_dir / ".foundation" / "discovery.yaml"
 
     with target.open(
         "w",
@@ -404,14 +383,11 @@ def write_metadata(
         "generated": {
             "discovery": ".foundation/discovery.yaml",
             "level0_bootstrap": "levels/level0/bootstrap",
+            "level0_governance": "levels/level0/governance",
         },
     }
 
-    metadata_path = (
-        output_dir
-        / ".foundation"
-        / "metadata.yaml"
-    )
+    metadata_path = output_dir / ".foundation" / "metadata.yaml"
 
     with metadata_path.open(
         "w",
@@ -428,7 +404,6 @@ def write_metadata(
 # Level 0 bootstrap generation
 # ---------------------------------------------------------------------------
 
-
 def render_level0_bootstrap(
     output_dir: Path,
     foundation_config: dict[str, Any],
@@ -442,63 +417,38 @@ def render_level0_bootstrap(
     The initial bootstrap intentionally has no AzureRM backend configuration.
     Terraform therefore starts with local state.
 
-    Backend configuration and state migration will later be handled by the
-    APF bootstrap lifecycle tooling after the Azure state storage exists.
+    A later APF bootstrap lifecycle tool will execute the bootstrap, create
+    the Azure state backend, generate backend configuration and migrate the
+    local bootstrap state to Azure.
     """
 
     environment = create_template_environment()
 
-    target_dir = (
-        output_dir
-        / "levels"
-        / "level0"
-        / "bootstrap"
-    )
+    target_dir = output_dir / "levels" / "level0" / "bootstrap"
 
     target_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # The generic skeleton created a placeholder for Level 0.
-    # It is no longer needed after real content has been generated.
-    level0_gitkeep = (
-        output_dir
-        / "levels"
-        / "level0"
-        / ".gitkeep"
-    )
+    level0_gitkeep = output_dir / "levels" / "level0" / ".gitkeep"
 
     if level0_gitkeep.exists():
         level0_gitkeep.unlink()
 
     context = {
-        "foundation_ref": (
-            foundation_config["foundation"]["version"]
-        ),
+        "foundation_ref": foundation_config["foundation"]["version"],
         "terraform_version": TERRAFORM_VERSION,
-        "terraform_required_version": (
-            TERRAFORM_REQUIRED_VERSION
-        ),
+        "terraform_required_version": TERRAFORM_REQUIRED_VERSION,
         "azurerm_version": AZURERM_VERSION,
     }
 
     templates = {
-        (
-            "level0/bootstrap/versions.tf.j2"
-        ): "versions.tf",
-        (
-            "level0/bootstrap/providers.tf.j2"
-        ): "providers.tf",
-        (
-            "level0/bootstrap/variables.tf.j2"
-        ): "variables.tf",
-        (
-            "level0/bootstrap/main.tf.j2"
-        ): "main.tf",
-        (
-            "level0/bootstrap/outputs.tf.j2"
-        ): "outputs.tf",
+        "level0/bootstrap/versions.tf.j2": "versions.tf",
+        "level0/bootstrap/providers.tf.j2": "providers.tf",
+        "level0/bootstrap/variables.tf.j2": "variables.tf",
+        "level0/bootstrap/main.tf.j2": "main.tf",
+        "level0/bootstrap/outputs.tf.j2": "outputs.tf",
     }
 
     for template_name, target_name in templates.items():
@@ -510,42 +460,23 @@ def render_level0_bootstrap(
         )
 
     tfvars = {
-        "tenant_id": (
-            customer_config["azure"]["tenant_id"]
-        ),
-        "subscription_id": (
-            customer_config["azure"][
-                "bootstrap_subscription_id"
-            ]
-        ),
-        "location": (
-            customer_config["azure"]["primary_region"]
-        ),
-        "name_prefix": (
-            platform_config["naming"]["prefix"]
-        ),
+        "tenant_id": customer_config["azure"]["tenant_id"],
+        "subscription_id": customer_config["azure"]["bootstrap_subscription_id"],
+        "location": customer_config["azure"]["primary_region"],
+        "name_prefix": platform_config["naming"]["prefix"],
         "github_owner": github["owner"],
         "github_owner_id": github["owner_id"],
         "github_repository": github["repository"],
-        "github_repository_id": (
-            github["repository_id"]
-        ),
+        "github_repository_id": github["repository_id"],
         "github_apply_environment": "apf-level0",
-        "github_governance_environment": (
-            "apf-governance"
-        ),
+        "github_governance_environment": "apf-governance",
         "tags": {
-            "environment": (
-                customer_config["customer"]["id"]
-            ),
+            "environment": customer_config["customer"]["id"],
             "project": "azure-platform-foundation",
         },
     }
 
-    tfvars_path = (
-        target_dir
-        / "generated.auto.tfvars.json"
-    )
+    tfvars_path = target_dir / "generated.auto.tfvars.json"
 
     with tfvars_path.open(
         "w",
@@ -556,14 +487,66 @@ def render_level0_bootstrap(
             handle,
             indent=2,
         )
-
         handle.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# Level 0 governance generation
+# ---------------------------------------------------------------------------
+
+def render_level0_governance(
+    output_dir: Path,
+    foundation_config: dict[str, Any],
+) -> None:
+    """
+    Generate the Level 0 governance Terraform root.
+
+    backend.tf is generated immediately.
+
+    backend.hcl is intentionally not generated yet because the Azure state
+    backend does not exist during initial customer project creation.
+
+    A later APF bootstrap lifecycle tool will generate backend.hcl and provide
+    the bootstrap-derived Terraform inputs required by governance.
+    """
+
+    environment = create_template_environment()
+
+    target_dir = output_dir / "levels" / "level0" / "governance"
+
+    target_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    context = {
+        "foundation_ref": foundation_config["foundation"]["version"],
+        "terraform_version": TERRAFORM_VERSION,
+        "terraform_required_version": TERRAFORM_REQUIRED_VERSION,
+        "azurerm_version": AZURERM_VERSION,
+    }
+
+    templates = {
+        "level0/governance/versions.tf.j2": "versions.tf",
+        "level0/governance/providers.tf.j2": "providers.tf",
+        "level0/governance/backend.tf.j2": "backend.tf",
+        "level0/governance/variables.tf.j2": "variables.tf",
+        "level0/governance/main.tf.j2": "main.tf",
+        "level0/governance/outputs.tf.j2": "outputs.tf",
+    }
+
+    for template_name, target_name in templates.items():
+        render_template(
+            environment=environment,
+            template_name=template_name,
+            target=target_dir / target_name,
+            context=context,
+        )
 
 
 # ---------------------------------------------------------------------------
 # Repository support files
 # ---------------------------------------------------------------------------
-
 
 def write_gitignore(
     output_dir: Path,
@@ -624,23 +607,13 @@ def write_readme(
 ) -> None:
     customer_id = customer["customer"]["id"]
     display_name = customer["customer"]["display_name"]
+    foundation_version = foundation["foundation"]["version"]
+    deployment_mode = platform["deployment"]["mode"]
+    execution_provider = platform["execution"]["provider"]
+    primary_region = customer["azure"]["primary_region"]
 
-    foundation_version = (
-        foundation["foundation"]["version"]
-    )
-
-    deployment_mode = (
-        platform["deployment"]["mode"]
-    )
-
-    execution_provider = (
-        platform["execution"]["provider"]
-    )
-
-    primary_region = (
-        customer["azure"]["primary_region"]
-    )
-
+    # Deliberately avoid Markdown fenced code blocks here so this Python file
+    # remains easy to copy, render and maintain.
     content = f"""\
 # {display_name} Azure Platform
 
@@ -661,15 +634,83 @@ This repository contains the customer-specific implementation of the
 
 The authoritative platform configuration is stored in:
 
-```text
-config/
-├── foundation.yaml
-├── customer.yaml
-└── platform.yaml
-```
+    config/
+    ├── foundation.yaml
+    ├── customer.yaml
+    └── platform.yaml
 
-This repository is intentionally kept minimal and is ready for the APF
-bootstrap and deployment workflow.
+These files define the customer-specific contract with Azure Platform
+Foundation.
+
+Generated implementation metadata is stored in:
+
+    .foundation/
+    ├── metadata.yaml
+    └── discovery.yaml
+
+`.foundation/discovery.yaml` contains generated infrastructure identity
+information such as immutable GitHub owner and repository IDs.
+
+It is generated by APF and should not be edited manually.
+
+## Foundation Levels
+
+    levels/
+    ├── level0/
+    │   ├── bootstrap/
+    │   └── governance/
+    ├── level1/
+    ├── level2/
+    ├── level3/
+    └── level4/
+
+## Level 0 Bootstrap
+
+The Level 0 bootstrap root is generated from the authoritative APF
+configuration.
+
+Generated Terraform input values are stored in:
+
+    levels/level0/bootstrap/generated.auto.tfvars.json
+
+The initial Level 0 bootstrap starts with local Terraform state.
+
+The APF bootstrap lifecycle will later create the Azure state backend
+and migrate the bootstrap state to Azure.
+
+## Level 0 Governance
+
+The Level 0 governance root is generated automatically.
+
+It manages privileged platform permissions separately from the normal
+platform execution plane.
+
+The initial governance root contains:
+
+    levels/level0/governance/
+    ├── backend.tf
+    ├── main.tf
+    ├── outputs.tf
+    ├── providers.tf
+    ├── variables.tf
+    └── versions.tf
+
+`backend.hcl` is intentionally not created during customer
+initialization.
+
+It will be generated later by the APF bootstrap lifecycle after the
+Azure state backend exists.
+
+## Important
+
+This repository contains customer-specific platform configuration.
+
+Do not commit passwords, client secrets, private keys, access tokens,
+or other long-lived credentials.
+
+Platform authentication should use workload identity federation,
+OIDC, managed identities, and other short-lived authentication
+mechanisms supported by Azure Platform Foundation.
 """
 
     (output_dir / "README.md").write_text(
@@ -677,10 +718,10 @@ bootstrap and deployment workflow.
         encoding="utf-8",
     )
 
+
 # ---------------------------------------------------------------------------
 # Console output
 # ---------------------------------------------------------------------------
-
 
 def print_summary(
     output_dir: Path,
@@ -693,71 +734,26 @@ def print_summary(
     print("Customer project initialized successfully.")
     print("------------------------------------------")
 
-    print(
-        f"Customer:        "
-        f"{customer['customer']['display_name']}"
-    )
-
-    print(
-        f"Customer ID:     "
-        f"{customer['customer']['id']}"
-    )
-
-    print(
-        f"Foundation:      "
-        f"{foundation['foundation']['version']}"
-    )
-
-    print(
-        f"Deployment mode: "
-        f"{platform['deployment']['mode']}"
-    )
-
-    print(
-        f"Execution:       "
-        f"{platform['execution']['provider']}"
-    )
-
-    print(
-        f"GitHub:          "
-        f"{github['owner']}/{github['repository']}"
-    )
-
-    print(
-        f"GitHub repo ID:  "
-        f"{github['repository_id']}"
-    )
-
-    print(
-        f"Terraform:       "
-        f"{TERRAFORM_VERSION}"
-    )
-
-    print(
-        f"AzureRM:         "
-        f"{AZURERM_VERSION}"
-    )
-
-    print(
-        f"Output:          "
-        f"{output_dir}"
-    )
+    print(f"Customer:        {customer['customer']['display_name']}")
+    print(f"Customer ID:     {customer['customer']['id']}")
+    print(f"Foundation:      {foundation['foundation']['version']}")
+    print(f"Deployment mode: {platform['deployment']['mode']}")
+    print(f"Execution:       {platform['execution']['provider']}")
+    print(f"GitHub:          {github['owner']}/{github['repository']}")
+    print(f"GitHub repo ID:  {github['repository_id']}")
+    print(f"Terraform:       {TERRAFORM_VERSION}")
+    print(f"AzureRM:         {AZURERM_VERSION}")
+    print(f"Output:          {output_dir}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-
 def main() -> int:
     args = parse_arguments()
 
-    repo_root = (
-        Path(__file__)
-        .resolve()
-        .parents[2]
-    )
-
+    repo_root = Path(__file__).resolve().parents[2]
     config_dir = args.config_dir.resolve()
 
     schema_dir = (
@@ -770,8 +766,7 @@ def main() -> int:
 
     if not config_dir.is_dir():
         print(
-            f"[ERROR] Configuration directory does not exist: "
-            f"{config_dir}",
+            f"[ERROR] Configuration directory does not exist: {config_dir}",
             file=sys.stderr,
         )
         return 2
@@ -784,13 +779,11 @@ def main() -> int:
 
     if validation_result != 0:
         print()
-
         print(
             "[ERROR] Customer project initialization aborted "
             "because configuration validation failed.",
             file=sys.stderr,
         )
-
         return validation_result
 
     try:
@@ -806,9 +799,7 @@ def main() -> int:
             config_dir / "platform.yaml"
         )
 
-        execution_provider = (
-            platform["execution"]["provider"]
-        )
+        execution_provider = platform["execution"]["provider"]
 
         if execution_provider != "github":
             raise RuntimeError(
@@ -816,9 +807,7 @@ def main() -> int:
                 "supports execution.provider='github' only."
             )
 
-        github_config = (
-            platform["execution"].get("github")
-        )
+        github_config = platform["execution"].get("github")
 
         if not isinstance(github_config, dict):
             raise RuntimeError(
@@ -826,9 +815,7 @@ def main() -> int:
             )
 
         github_owner = github_config.get("owner")
-        github_repository = github_config.get(
-            "repository"
-        )
+        github_repository = github_config.get("repository")
 
         if not github_owner:
             raise RuntimeError(
@@ -892,6 +879,15 @@ def main() -> int:
             github=github,
         )
 
+        print(
+            "Generating Level 0 governance Terraform root..."
+        )
+
+        render_level0_governance(
+            output_dir=output_dir,
+            foundation_config=foundation,
+        )
+
         write_gitignore(
             output_dir
         )
@@ -911,11 +907,9 @@ def main() -> int:
         json.JSONDecodeError,
     ) as exc:
         print(
-            f"[ERROR] Customer project initialization failed: "
-            f"{exc}",
+            f"[ERROR] Customer project initialization failed: {exc}",
             file=sys.stderr,
         )
-
         return 2
 
     print_summary(
