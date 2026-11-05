@@ -384,6 +384,7 @@ def write_metadata(
             "discovery": ".foundation/discovery.yaml",
             "level0_bootstrap": "levels/level0/bootstrap",
             "level0_governance": "levels/level0/governance",
+            "github_workflows": ".github/workflows",
         },
     }
 
@@ -533,6 +534,56 @@ def render_level0_governance(
         "level0/governance/variables.tf.j2": "variables.tf",
         "level0/governance/main.tf.j2": "main.tf",
         "level0/governance/outputs.tf.j2": "outputs.tf",
+    }
+
+    for template_name, target_name in templates.items():
+        render_template(
+            environment=environment,
+            template_name=template_name,
+            target=target_dir / target_name,
+            context=context,
+        )
+
+
+# ---------------------------------------------------------------------------
+# GitHub workflow generation
+# ---------------------------------------------------------------------------
+
+def render_github_workflows(
+    output_dir: Path,
+) -> None:
+    """
+    Generate the GitHub Actions workflows used by the APF Level 0
+    execution and governance planes.
+
+    The workflows are generated during customer initialization, but they
+    become operational only after the later bootstrap lifecycle has created
+    the Azure backend, configured GitHub environments and populated the
+    required GitHub Actions configuration.
+    """
+
+    environment = create_template_environment()
+
+    target_dir = output_dir / ".github" / "workflows"
+
+    target_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    context = {
+        "terraform_version": TERRAFORM_VERSION,
+    }
+
+    templates = {
+        "github/terraform-plan.yml.j2": "terraform-plan.yml",
+        "github/terraform-apply.yml.j2": "terraform-apply.yml",
+        "github/terraform-governance-plan.yml.j2": (
+            "terraform-governance-plan.yml"
+        ),
+        "github/terraform-governance-apply.yml.j2": (
+            "terraform-governance-apply.yml"
+        ),
     }
 
     for template_name, target_name in templates.items():
@@ -700,6 +751,22 @@ initialization.
 
 It will be generated later by the APF bootstrap lifecycle after the
 Azure state backend exists.
+
+## GitHub Workflows
+
+The customer project contains generated GitHub Actions workflows:
+
+    .github/workflows/
+    ├── terraform-plan.yml
+    ├── terraform-apply.yml
+    ├── terraform-governance-plan.yml
+    └── terraform-governance-apply.yml
+
+These workflows use workload identity federation and do not require
+long-lived Azure client secrets.
+
+They become operational after the APF bootstrap lifecycle has configured
+the Azure backend and the required GitHub environments and identifiers.
 
 ## Important
 
@@ -886,6 +953,14 @@ def main() -> int:
         render_level0_governance(
             output_dir=output_dir,
             foundation_config=foundation,
+        )
+
+        print(
+            "Generating GitHub Actions workflows..."
+        )
+
+        render_github_workflows(
+            output_dir=output_dir,
         )
 
         write_gitignore(

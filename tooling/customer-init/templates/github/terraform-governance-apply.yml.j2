@@ -1,0 +1,82 @@
+name: Terraform Governance Apply - Level 0
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  AZURE_CORE_OUTPUT: "none"
+  TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+  TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  governance-apply:
+    name: Governance Apply
+    runs-on: ubuntu-latest
+
+    environment:
+      name: apf-governance
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "[[ terraform_version ]]"
+
+      - name: Azure login with Governance identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_GOVERNANCE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Initialize Bootstrap state
+        working-directory: levels/level0/bootstrap
+        run: |
+          terraform init \
+            -backend-config=backend.hcl \
+            -backend-config="use_cli=true"
+
+      - name: Read Bootstrap outputs
+        working-directory: levels/level0/bootstrap
+        run: |
+          echo "TF_VAR_governance_principal_id=$(terraform output -raw governance_identity_principal_id)" >> "$GITHUB_ENV"
+          echo "TF_VAR_state_container_id=$(terraform output -raw state_container_id)" >> "$GITHUB_ENV"
+
+      - name: Initialize Governance state
+        working-directory: levels/level0/governance
+        run: |
+          terraform init \
+            -upgrade \
+            -backend-config=backend.hcl \
+            -backend-config="use_cli=true"
+
+      - name: Terraform format check
+        working-directory: levels/level0/governance
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        working-directory: levels/level0/governance
+        run: terraform validate
+
+      - name: Terraform Governance Plan
+        working-directory: levels/level0/governance
+        run: |
+          terraform plan \
+            -lock-timeout=5m \
+            -out=governance.tfplan
+
+      - name: Terraform Governance Apply
+        working-directory: levels/level0/governance
+        run: |
+          terraform apply \
+            -auto-approve \
+            governance.tfplan

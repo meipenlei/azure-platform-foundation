@@ -314,6 +314,139 @@ jobs:
           echo
           echo "[PASS] Generated customer project structure is valid."
 
+      - name: Verify generated GitHub workflows
+        run: |
+          set -euo pipefail
+
+          WORKFLOW_DIR="${RUNNER_TEMP}/apf-customer-project/.github/workflows"
+
+          test -f "${WORKFLOW_DIR}/terraform-plan.yml"
+          test -f "${WORKFLOW_DIR}/terraform-apply.yml"
+          test -f "${WORKFLOW_DIR}/terraform-governance-plan.yml"
+          test -f "${WORKFLOW_DIR}/terraform-governance-apply.yml"
+
+          echo "[PASS] All Level 0 GitHub workflows were generated."
+
+      - name: Verify generated workflow configuration
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          project = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "apf-customer-project"
+          )
+
+          workflow_dir = (
+              project
+              / ".github"
+              / "workflows"
+          )
+
+          workflows = (
+              "terraform-plan.yml",
+              "terraform-apply.yml",
+              "terraform-governance-plan.yml",
+              "terraform-governance-apply.yml",
+          )
+
+          for workflow_name in workflows:
+              path = workflow_dir / workflow_name
+              content = path.read_text(encoding="utf-8")
+
+              if 'terraform_version: "1.17.1"' not in content:
+                  raise SystemExit(
+                      f"[ERROR] Terraform 1.17.1 not found in "
+                      f"{workflow_name}"
+                  )
+
+              if "id-token: write" not in content:
+                  raise SystemExit(
+                      f"[ERROR] OIDC permission missing in "
+                      f"{workflow_name}"
+                  )
+
+              if "azure/login@v3" not in content:
+                  raise SystemExit(
+                      f"[ERROR] Azure OIDC login missing in "
+                      f"{workflow_name}"
+                  )
+
+              print(
+                  f"[PASS] {workflow_name}"
+              )
+
+          print()
+          print(
+              "All generated GitHub workflows are valid."
+          )
+          PY
+
+      - name: Verify Level 0 workflow security boundaries
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          workflow_dir = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "apf-customer-project"
+              / ".github"
+              / "workflows"
+          )
+
+          plan = (
+              workflow_dir
+              / "terraform-plan.yml"
+          ).read_text(encoding="utf-8")
+
+          apply = (
+              workflow_dir
+              / "terraform-apply.yml"
+          ).read_text(encoding="utf-8")
+
+          governance_plan = (
+              workflow_dir
+              / "terraform-governance-plan.yml"
+          ).read_text(encoding="utf-8")
+
+          governance_apply = (
+              workflow_dir
+              / "terraform-governance-apply.yml"
+          ).read_text(encoding="utf-8")
+
+          assert "AZURE_PLAN_CLIENT_ID" in plan
+          assert "AZURE_APPLY_CLIENT_ID" in apply
+
+          assert (
+              "environment:\n      name: apf-level0"
+              in apply
+          )
+
+          assert "AZURE_GOVERNANCE_CLIENT_ID" in governance_plan
+          assert "AZURE_GOVERNANCE_CLIENT_ID" in governance_apply
+
+          assert (
+              "environment:\n      name: apf-governance"
+              in governance_plan
+          )
+
+          assert (
+              "environment:\n      name: apf-governance"
+              in governance_apply
+          )
+
+          print(
+              "[PASS] Level 0 execution identities are separated."
+          )
+
+          print(
+              "[PASS] Governance workflows use the "
+              "apf-governance environment."
+          )
+          PY
+
       - name: Verify GitHub discovery metadata
         env:
           APF_GITHUB_OWNER: ${{ github.repository_owner }}
