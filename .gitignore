@@ -28,3 +28,5 @@ crash.*.log
 # Temporary files
 *.tmp
 *.bak
+# Windows Mark-of-the-Web / alternate data stream artifacts
+*:Zone.Identifier
