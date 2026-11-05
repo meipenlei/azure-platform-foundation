@@ -4,6 +4,12 @@ resource "azurerm_role_assignment" "governance_subscription_rbac_admin" {
   principal_id         = var.governance_principal_id
 
   skip_service_principal_aad_check = true
+
+  lifecycle {
+    ignore_changes = [
+      skip_service_principal_aad_check
+    ]
+  }
 }
 
 resource "azurerm_role_assignment" "governance_state" {
@@ -12,4 +18,10 @@ resource "azurerm_role_assignment" "governance_state" {
   principal_id         = var.governance_principal_id
 
   skip_service_principal_aad_check = true
+
+  lifecycle {
+    ignore_changes = [
+      skip_service_principal_aad_check
+    ]
+  }
 }
