@@ -111,6 +111,34 @@ jobs:
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.17.1"
+      
+      - name: Install customer-bootstrap dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -r tooling/customer-bootstrap/requirements.txt
+
+      - name: Compile customer-bootstrap
+        run: |
+          python -m py_compile \
+            tooling/customer-bootstrap/bootstrap.py
+
+      - name: Verify customer-bootstrap CLI
+        run: |
+          python tooling/customer-bootstrap/bootstrap.py \
+            --help > "$RUNNER_TEMP/customer-bootstrap-help.txt"
+
+          grep -- "--project-dir" \
+            "$RUNNER_TEMP/customer-bootstrap-help.txt"
+
+          grep -- "--apply" \
+            "$RUNNER_TEMP/customer-bootstrap-help.txt"
+
+          grep -- "--governance" \
+            "$RUNNER_TEMP/customer-bootstrap-help.txt"
+
+          grep -- "--keep-temporary-state-access" \
+            "$RUNNER_TEMP/customer-bootstrap-help.txt"
 
       - name: Install customer-init dependencies
         run: |
