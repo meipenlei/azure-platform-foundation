@@ -20,13 +20,19 @@ Commit 4 scope:
 - verifies that the migrated remote state is readable
 - removes temporary state-container access by default
 
-The governance plan/apply handover is intentionally deferred to Commit 5.
+Commit 5 additionally supports an explicit governance handover:
+- derives governance Terraform inputs from bootstrap outputs
+- initializes the separate governance state
+- plans governance changes with the local privileged bootstrap operator
+- applies governance changes only when both --governance and --apply are used
+- verifies the governance remote state after apply
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -89,6 +95,16 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--governance",
+        action="store_true",
+        help=(
+            "Continue with the Level 0 governance handover after the "
+            "bootstrap phase. Without --apply this performs a governance "
+            "plan only. With --apply it also applies governance."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -98,9 +114,16 @@ def run_command(
     cwd: Path | None = None,
     capture_output: bool = False,
     check: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     printable = " ".join(command)
     print(f"+ {printable}")
+
+    process_env = None
+
+    if env is not None:
+        process_env = os.environ.copy()
+        process_env.update(env)
 
     result = subprocess.run(
         list(command),
@@ -108,6 +131,7 @@ def run_command(
         check=False,
         capture_output=capture_output,
         text=True,
+        env=process_env,
     )
 
     if check and result.returncode != 0:
@@ -1050,6 +1074,185 @@ def verify_remote_state(
     )
 
 
+def ensure_governance_backend(
+    governance_dir: Path,
+    backend: dict[str, str],
+    *,
+    allow_create: bool,
+) -> None:
+    backend_hcl = (
+        governance_dir
+        / "backend.hcl"
+    )
+
+    if backend_hcl.is_file():
+        print(
+            "[PASS] Existing governance backend.hcl will be preserved."
+        )
+        return
+
+    if not allow_create:
+        raise BootstrapError(
+            "Governance backend.hcl does not exist yet. "
+            "Run customer-bootstrap with --governance --apply after the "
+            "bootstrap backend exists so APF can generate it."
+        )
+
+    write_text_file(
+        backend_hcl,
+        build_backend_hcl(
+            backend,
+            state_key=GOVERNANCE_STATE_KEY,
+        ),
+    )
+
+    print(
+        "[PASS] Generated governance backend.hcl."
+    )
+
+
+def governance_tf_environment(
+    *,
+    tenant_id: str,
+    subscription_id: str,
+    outputs: dict[str, Any],
+) -> dict[str, str]:
+    governance_principal_id = str(
+        require_output_value(
+            outputs,
+            "governance_identity_principal_id",
+        )
+    )
+
+    state_container_id = str(
+        require_output_value(
+            outputs,
+            "state_container_id",
+        )
+    )
+
+    return {
+        "TF_VAR_tenant_id": tenant_id,
+        "TF_VAR_subscription_id": subscription_id,
+        "TF_VAR_governance_principal_id": governance_principal_id,
+        "TF_VAR_state_container_id": state_container_id,
+    }
+
+
+def terraform_init_governance(
+    governance_dir: Path,
+) -> None:
+    run_command(
+        [
+            "terraform",
+            "init",
+            "-reconfigure",
+            "-backend-config=backend.hcl",
+        ],
+        cwd=governance_dir,
+    )
+
+
+def terraform_validate_governance(
+    governance_dir: Path,
+    governance_env: dict[str, str],
+) -> None:
+    run_command(
+        [
+            "terraform",
+            "fmt",
+            "-check",
+            "-recursive",
+        ],
+        cwd=governance_dir,
+        env=governance_env,
+    )
+
+    run_command(
+        [
+            "terraform",
+            "validate",
+        ],
+        cwd=governance_dir,
+        env=governance_env,
+    )
+
+
+def terraform_plan_governance(
+    governance_dir: Path,
+    governance_env: dict[str, str],
+) -> Path:
+    plan_path = (
+        governance_dir
+        / ".apf-governance.tfplan"
+    )
+
+    if plan_path.exists():
+        plan_path.unlink()
+
+    run_command(
+        [
+            "terraform",
+            "plan",
+            "-lock-timeout=5m",
+            "-out=.apf-governance.tfplan",
+        ],
+        cwd=governance_dir,
+        env=governance_env,
+    )
+
+    return plan_path
+
+
+def terraform_apply_governance(
+    governance_dir: Path,
+    plan_path: Path,
+    governance_env: dict[str, str],
+) -> None:
+    run_command(
+        [
+            "terraform",
+            "apply",
+            "-auto-approve",
+            plan_path.name,
+        ],
+        cwd=governance_dir,
+        env=governance_env,
+    )
+
+
+def verify_governance_state(
+    governance_dir: Path,
+    governance_env: dict[str, str],
+) -> None:
+    result = run_command(
+        [
+            "terraform",
+            "state",
+            "list",
+        ],
+        cwd=governance_dir,
+        capture_output=True,
+        env=governance_env,
+    )
+
+    resources = [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip()
+    ]
+
+    if not resources:
+        raise BootstrapError(
+            "Governance Terraform state is readable but contains no resources."
+        )
+
+    print(
+        f"[PASS] Governance remote state is readable "
+        f"({len(resources)} resources)."
+    )
+
+
 def cleanup_plan(
     plan_path: Path,
 ) -> None:
@@ -1132,33 +1335,41 @@ def main() -> int:
         )
 
         if not args.apply:
+            cleanup_plan(
+                plan_path
+            )
+
             print()
             print(
-                "Plan completed successfully."
+                "Bootstrap plan completed successfully."
             )
             print(
-                "No Azure changes were applied."
+                "No bootstrap Azure changes were applied."
             )
+
+            if not args.governance:
+                print(
+                    "Run the same command with --apply to execute "
+                    "the bootstrap lifecycle."
+                )
+                return 0
+
             print(
-                "Run the same command with --apply to execute "
-                "the bootstrap lifecycle."
+                "Continuing with a governance plan against the "
+                "current bootstrap state."
+            )
+
+        else:
+            print()
+            print("Applying Level 0 bootstrap...")
+            terraform_apply(
+                bootstrap_dir,
+                plan_path,
             )
 
             cleanup_plan(
                 plan_path
             )
-            return 0
-
-        print()
-        print("Applying Level 0 bootstrap...")
-        terraform_apply(
-            bootstrap_dir,
-            plan_path,
-        )
-
-        cleanup_plan(
-            plan_path
-        )
 
         print()
         print("Reading Level 0 bootstrap outputs...")
@@ -1179,87 +1390,178 @@ def main() -> int:
             )
         )
 
-        if state_mode == "remote":
-            print()
-            print(
-                "[INFO] Bootstrap state was already remote. "
-                "Existing backend files will be preserved."
-            )
+        if args.apply:
+            if state_mode == "remote":
+                print()
+                print(
+                    "[INFO] Bootstrap state was already remote. "
+                    "Existing backend files will be preserved."
+                )
 
-            terraform_init_bootstrap(
-                bootstrap_dir,
-                "remote",
-            )
+                terraform_init_bootstrap(
+                    bootstrap_dir,
+                    "remote",
+                )
 
-            verify_remote_state(
-                bootstrap_dir
-            )
+                verify_remote_state(
+                    bootstrap_dir
+                )
 
+            else:
+                write_backend_files(
+                    bootstrap_dir=bootstrap_dir,
+                    governance_dir=governance_dir,
+                    backend=backend,
+                )
+
+                principal_id = get_signed_in_user_object_id()
+
+                temporary_assignment_id: str | None = None
+
+                try:
+                    temporary_assignment_id = (
+                        ensure_temporary_state_access(
+                            principal_id=principal_id,
+                            scope=state_container_id,
+                        )
+                    )
+
+                    print()
+                    print(
+                        "Migrating Level 0 bootstrap state to Azure..."
+                    )
+
+                    migrate_bootstrap_state(
+                        bootstrap_dir
+                    )
+
+                    print()
+                    print(
+                        "Verifying migrated remote state..."
+                    )
+
+                    verify_remote_state(
+                        bootstrap_dir
+                    )
+
+                finally:
+                    if (
+                        temporary_assignment_id
+                        and not args.keep_temporary_state_access
+                    ):
+                        remove_role_assignment(
+                            temporary_assignment_id
+                        )
+
+        if not args.governance:
             print()
             print(
                 "Level 0 bootstrap lifecycle completed successfully."
             )
+
+            if args.apply:
+                print(
+                    f"Bootstrap state:  {BOOTSTRAP_STATE_KEY}"
+                )
+                print(
+                    f"Governance state: {GOVERNANCE_STATE_KEY}"
+                )
+
+            print()
+            print(
+                "Use --governance to include the Level 0 governance "
+                "handover."
+            )
             return 0
 
-        write_backend_files(
-            bootstrap_dir=bootstrap_dir,
-            governance_dir=governance_dir,
-            backend=backend,
+        print()
+        print("Preparing Level 0 governance handover...")
+
+        ensure_governance_backend(
+            governance_dir,
+            backend,
+            allow_create=args.apply,
         )
 
-        principal_id = get_signed_in_user_object_id()
+        governance_env = governance_tf_environment(
+            tenant_id=tenant_id,
+            subscription_id=subscription_id,
+            outputs=outputs,
+        )
 
-        temporary_assignment_id: str | None = None
+        print(
+            "[PASS] Governance Terraform inputs derived from "
+            "bootstrap outputs."
+        )
 
-        try:
-            temporary_assignment_id = (
-                ensure_temporary_state_access(
-                    principal_id=principal_id,
-                    scope=state_container_id,
-                )
+        print()
+        print("Initializing Level 0 governance...")
+        terraform_init_governance(
+            governance_dir
+        )
+
+        print()
+        print("Validating Level 0 governance...")
+        terraform_validate_governance(
+            governance_dir,
+            governance_env,
+        )
+
+        print()
+        print("Planning Level 0 governance...")
+        governance_plan_path = terraform_plan_governance(
+            governance_dir,
+            governance_env,
+        )
+
+        if not args.apply:
+            cleanup_plan(
+                governance_plan_path
             )
 
             print()
             print(
-                "Migrating Level 0 bootstrap state to Azure..."
+                "Governance plan completed successfully."
             )
-
-            migrate_bootstrap_state(
-                bootstrap_dir
+            print(
+                "No governance Azure changes were applied."
             )
-
             print()
             print(
-                "Verifying migrated remote state..."
+                "Run with --governance --apply to execute both "
+                "the bootstrap and governance lifecycle stages."
             )
+            return 0
 
-            verify_remote_state(
-                bootstrap_dir
-            )
+        print()
+        print("Applying Level 0 governance...")
+        terraform_apply_governance(
+            governance_dir,
+            governance_plan_path,
+            governance_env,
+        )
 
-        finally:
-            if (
-                temporary_assignment_id
-                and not args.keep_temporary_state_access
-            ):
-                remove_role_assignment(
-                    temporary_assignment_id
-                )
+        cleanup_plan(
+            governance_plan_path
+        )
+
+        print()
+        print("Verifying Level 0 governance state...")
+        verify_governance_state(
+            governance_dir,
+            governance_env,
+        )
 
         print()
         print(
-            "Level 0 bootstrap lifecycle completed successfully."
+            "Level 0 bootstrap and governance lifecycle "
+            "completed successfully."
         )
         print(
             f"Bootstrap state:  {BOOTSTRAP_STATE_KEY}"
         )
         print(
             f"Governance state: {GOVERNANCE_STATE_KEY}"
-        )
-        print()
-        print(
-            "The customer project is ready for the governance "
-            "handover implemented in the next lifecycle stage."
         )
 
         return 0
