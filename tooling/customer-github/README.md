@@ -22,7 +22,27 @@ The following values are identifiers and are not credentials:
 No password, client secret, storage key, private key, PAT, or other long-lived
 Azure credential is stored by this tool.
 
+## Deployment protection baseline
+
+APF restricts both privileged GitHub environments to the repository's current
+default branch.
+
+For a repository whose default branch is `main`, the desired state is:
+
+    apf-level0:
+      deployment branches: main only
+
+    apf-governance:
+      deployment branches: main only
+
+The default branch is discovered from GitHub; it is not hard-coded.
+
+Commit 7 intentionally does not configure required reviewers or wait timers.
+Those controls vary by GitHub plan for private repositories and should become
+explicit organization/customer policy later.
+
 ## Desired GitHub configuration
+
 
 Repository Actions variables:
 
@@ -96,7 +116,8 @@ The tool:
 4. reads bootstrap outputs
 5. validates all OIDC subjects
 6. compares environments and variable values
-7. prints the planned GitHub changes
+7. compares privileged environment deployment branch policies
+8. prints the planned GitHub changes
 
 No GitHub configuration is changed.
 
@@ -106,7 +127,8 @@ No GitHub configuration is changed.
       --project-dir ../lab01-apf-azure-platform \
       --apply
 
-This creates missing environments, creates/updates variables, and verifies the
+This creates missing environments, creates/updates variables, restricts both
+privileged environments to the repository default branch, and verifies the
 final desired state.
 
 ## Existing repositories

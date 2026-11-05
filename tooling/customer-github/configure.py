@@ -12,6 +12,7 @@ Commit 6 scope:
 - checks the expected GitHub environments
 - checks repository/environment Actions variables
 - applies GitHub configuration only when --apply is supplied
+- enforces a default-branch-only deployment baseline on privileged environments
 - verifies the resulting GitHub configuration
 
 This tool does not create Azure resources and does not use long-lived
@@ -27,6 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import quote
 
 import yaml
 
@@ -404,6 +406,9 @@ def discover_github_repository(
         repository_id = str(
             payload["id"]
         )
+        default_branch = str(
+            payload["default_branch"]
+        )
     except (KeyError, TypeError) as exc:
         raise GitHubConfigurationError(
             "GitHub repository response is missing immutable "
@@ -424,7 +429,8 @@ def discover_github_repository(
     print(
         "[PASS] GitHub repository discovered: "
         f"{discovered_owner}/{discovered_repository} "
-        f"(owner ID {owner_id}, repository ID {repository_id})."
+        f"(owner ID {owner_id}, repository ID {repository_id}, "
+        f"default branch {default_branch})."
     )
 
     return {
@@ -432,6 +438,7 @@ def discover_github_repository(
         "owner_id": owner_id,
         "repository": discovered_repository,
         "repository_id": repository_id,
+        "default_branch": default_branch,
     }
 
 
@@ -556,6 +563,439 @@ def verify_oidc_subjects(
     )
 
 
+def environment_path(
+    repo_slug: str,
+    environment_name: str,
+) -> str:
+    encoded = quote(
+        environment_name,
+        safe="",
+    )
+
+    return (
+        f"repos/{repo_slug}/"
+        f"environments/{encoded}"
+    )
+
+
+def get_environment(
+    repo_slug: str,
+    environment_name: str,
+) -> dict[str, Any] | None:
+    result = run_command(
+        [
+            "gh",
+            "api",
+            environment_path(
+                repo_slug,
+                environment_name,
+            ),
+        ],
+        capture_output=True,
+        check=False,
+    )
+
+    if result.returncode == 0:
+        try:
+            payload = json.loads(
+                result.stdout
+            )
+        except json.JSONDecodeError as exc:
+            raise GitHubConfigurationError(
+                "GitHub CLI returned invalid environment JSON."
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise GitHubConfigurationError(
+                "GitHub CLI returned an unexpected environment response."
+            )
+
+        return payload
+
+    combined = (
+        (result.stdout or "")
+        + "\n"
+        + (result.stderr or "")
+    )
+
+    if (
+        "404" in combined
+        or "Not Found" in combined
+    ):
+        return None
+
+    raise GitHubConfigurationError(
+        "Unable to determine GitHub environment state for "
+        f"'{environment_name}'.\n{combined.strip()}"
+    )
+
+
+def list_deployment_branch_policies(
+    repo_slug: str,
+    environment_name: str,
+) -> list[dict[str, Any]]:
+    environment = get_environment(
+        repo_slug,
+        environment_name,
+    )
+
+    if environment is None:
+        return []
+
+    policy = environment.get(
+        "deployment_branch_policy"
+    )
+
+    if not isinstance(
+        policy,
+        dict,
+    ):
+        return []
+
+    if not policy.get(
+        "custom_branch_policies",
+        False,
+    ):
+        return []
+
+    endpoint = (
+        f"{environment_path(repo_slug, environment_name)}"
+        "/deployment-branch-policies"
+    )
+
+    result = run_command(
+        [
+            "gh",
+            "api",
+            endpoint,
+        ],
+        capture_output=True,
+    )
+
+    try:
+        payload = json.loads(
+            result.stdout
+        )
+    except json.JSONDecodeError as exc:
+        raise GitHubConfigurationError(
+            "GitHub CLI returned invalid deployment branch policy JSON."
+        ) from exc
+
+    policies = payload.get(
+        "branch_policies",
+        []
+    )
+
+    if not isinstance(
+        policies,
+        list,
+    ):
+        raise GitHubConfigurationError(
+            "GitHub CLI returned an unexpected deployment branch "
+            "policy response."
+        )
+
+    return [
+        entry
+        for entry in policies
+        if isinstance(
+            entry,
+            dict,
+        )
+    ]
+
+
+def environment_has_custom_branch_policy_mode(
+    environment: dict[str, Any] | None,
+) -> bool:
+    if environment is None:
+        return False
+
+    policy = environment.get(
+        "deployment_branch_policy"
+    )
+
+    if not isinstance(
+        policy,
+        dict,
+    ):
+        return False
+
+    return (
+        policy.get("protected_branches") is False
+        and policy.get("custom_branch_policies") is True
+    )
+
+
+def desired_branch_policy_changes(
+    *,
+    repo_slug: str,
+    environment_name: str,
+    default_branch: str,
+) -> list[str]:
+    changes: list[str] = []
+
+    environment = get_environment(
+        repo_slug,
+        environment_name,
+    )
+
+    if not environment_has_custom_branch_policy_mode(
+        environment
+    ):
+        changes.append(
+            f"{environment_name}: enable custom deployment branch policies"
+        )
+
+    policies = list_deployment_branch_policies(
+        repo_slug,
+        environment_name,
+    )
+
+    policy_names = [
+        str(
+            entry.get(
+                "name",
+                "",
+            )
+        )
+        for entry in policies
+    ]
+
+    if default_branch not in policy_names:
+        changes.append(
+            f"{environment_name}: allow default branch '{default_branch}'"
+        )
+
+    for entry in policies:
+        name = str(
+            entry.get(
+                "name",
+                "",
+            )
+        )
+
+        if (
+            name
+            and name != default_branch
+        ):
+            changes.append(
+                f"{environment_name}: remove deployment policy '{name}'"
+            )
+
+    return changes
+
+
+def enable_custom_branch_policy_mode(
+    repo_slug: str,
+    environment_name: str,
+) -> None:
+    payload = {
+        "deployment_branch_policy": {
+            "protected_branches": False,
+            "custom_branch_policies": True,
+        }
+    }
+
+    run_command(
+        [
+            "gh",
+            "api",
+            "-X",
+            "PUT",
+            environment_path(
+                repo_slug,
+                environment_name,
+            ),
+            "--input",
+            "-",
+            "--silent",
+        ],
+        input_text=(
+            json.dumps(
+                payload
+            )
+            + "\n"
+        ),
+    )
+
+
+def create_deployment_branch_policy(
+    repo_slug: str,
+    environment_name: str,
+    branch_name: str,
+) -> None:
+    endpoint = (
+        f"{environment_path(repo_slug, environment_name)}"
+        "/deployment-branch-policies"
+    )
+
+    payload = {
+        "name": branch_name,
+        "type": "branch",
+    }
+
+    run_command(
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            endpoint,
+            "--input",
+            "-",
+            "--silent",
+        ],
+        input_text=(
+            json.dumps(
+                payload
+            )
+            + "\n"
+        ),
+    )
+
+
+def delete_deployment_branch_policy(
+    repo_slug: str,
+    environment_name: str,
+    policy_id: str,
+) -> None:
+    endpoint = (
+        f"{environment_path(repo_slug, environment_name)}"
+        f"/deployment-branch-policies/{policy_id}"
+    )
+
+    run_command(
+        [
+            "gh",
+            "api",
+            "-X",
+            "DELETE",
+            endpoint,
+            "--silent",
+        ],
+    )
+
+
+def apply_default_branch_protection(
+    *,
+    repo_slug: str,
+    environment_name: str,
+    default_branch: str,
+) -> None:
+    enable_custom_branch_policy_mode(
+        repo_slug,
+        environment_name,
+    )
+
+    policies = list_deployment_branch_policies(
+        repo_slug,
+        environment_name,
+    )
+
+    default_exists = any(
+        str(
+            entry.get(
+                "name",
+                "",
+            )
+        )
+        == default_branch
+        for entry in policies
+    )
+
+    if not default_exists:
+        create_deployment_branch_policy(
+            repo_slug,
+            environment_name,
+            default_branch,
+        )
+
+    policies = list_deployment_branch_policies(
+        repo_slug,
+        environment_name,
+    )
+
+    for entry in policies:
+        name = str(
+            entry.get(
+                "name",
+                "",
+            )
+        )
+
+        policy_id = entry.get(
+            "id"
+        )
+
+        if (
+            name
+            and name != default_branch
+            and policy_id is not None
+        ):
+            delete_deployment_branch_policy(
+                repo_slug,
+                environment_name,
+                str(policy_id),
+            )
+
+    print(
+        f"[PASS] {environment_name}: deployments restricted "
+        f"to default branch '{default_branch}'."
+    )
+
+
+def verify_default_branch_protection(
+    *,
+    repo_slug: str,
+    environment_name: str,
+    default_branch: str,
+) -> None:
+    environment = get_environment(
+        repo_slug,
+        environment_name,
+    )
+
+    if not environment_has_custom_branch_policy_mode(
+        environment
+    ):
+        raise GitHubConfigurationError(
+            f"{environment_name} is not using custom deployment "
+            "branch policies."
+        )
+
+    policies = list_deployment_branch_policies(
+        repo_slug,
+        environment_name,
+    )
+
+    names = sorted(
+        str(
+            entry.get(
+                "name",
+                "",
+            )
+        )
+        for entry in policies
+        if entry.get(
+            "name"
+        )
+    )
+
+    if names != [
+        default_branch
+    ]:
+        raise GitHubConfigurationError(
+            f"{environment_name} deployment branch policy drift. "
+            f"Expected only '{default_branch}', found: {names}"
+        )
+
+    print(
+        f"[PASS] {environment_name}: default-branch-only "
+        "deployment policy verified."
+    )
+
+
 def desired_variables(
     *,
     tenant_id: str,
@@ -590,35 +1030,12 @@ def environment_exists(
     repo_slug: str,
     environment_name: str,
 ) -> bool:
-    result = run_command(
-        [
-            "gh",
-            "api",
-            f"repos/{repo_slug}/environments/{environment_name}",
-            "--silent",
-        ],
-        capture_output=True,
-        check=False,
-    )
-
-    if result.returncode == 0:
-        return True
-
-    combined = (
-        (result.stdout or "")
-        + "\n"
-        + (result.stderr or "")
-    )
-
-    if (
-        "404" in combined
-        or "Not Found" in combined
-    ):
-        return False
-
-    raise GitHubConfigurationError(
-        "Unable to determine GitHub environment state for "
-        f"'{environment_name}'.\n{combined.strip()}"
+    return (
+        get_environment(
+            repo_slug,
+            environment_name,
+        )
+        is not None
     )
 
 
@@ -632,7 +1049,10 @@ def ensure_environment(
             "api",
             "-X",
             "PUT",
-            f"repos/{repo_slug}/environments/{environment_name}",
+            environment_path(
+                repo_slug,
+                environment_name,
+            ),
             "--input",
             "-",
             "--silent",
@@ -869,6 +1289,7 @@ def print_plan(
     *,
     environment_state: dict[str, bool],
     variable_changes: list[str],
+    protection_changes: list[str],
 ) -> None:
     print()
     print("GitHub configuration plan")
@@ -888,6 +1309,12 @@ def print_plan(
             changes += 1
 
     for change in variable_changes:
+        print(
+            f"[PLAN] {change}"
+        )
+        changes += 1
+
+    for change in protection_changes:
         print(
             f"[PLAN] {change}"
         )
@@ -999,9 +1426,24 @@ def main() -> int:
             environment_state=environment_state,
         )
 
+        protection_changes: list[str] = []
+
+        for environment_name in (
+            LEVEL0_ENVIRONMENT,
+            GOVERNANCE_ENVIRONMENT,
+        ):
+            protection_changes.extend(
+                desired_branch_policy_changes(
+                    repo_slug=repo_slug,
+                    environment_name=environment_name,
+                    default_branch=github["default_branch"],
+                )
+            )
+
         print_plan(
             environment_state=environment_state,
             variable_changes=variable_changes,
+            protection_changes=protection_changes,
         )
 
         if not args.apply:
@@ -1029,6 +1471,16 @@ def main() -> int:
             repo_slug=repo_slug,
             desired=desired,
         )
+
+        for environment_name in (
+            LEVEL0_ENVIRONMENT,
+            GOVERNANCE_ENVIRONMENT,
+        ):
+            apply_default_branch_protection(
+                repo_slug=repo_slug,
+                environment_name=environment_name,
+                default_branch=github["default_branch"],
+            )
 
         print()
         print("Verifying GitHub configuration...")
@@ -1060,6 +1512,16 @@ def main() -> int:
         print(
             "[PASS] Required GitHub environments exist."
         )
+
+        for environment_name in (
+            LEVEL0_ENVIRONMENT,
+            GOVERNANCE_ENVIRONMENT,
+        ):
+            verify_default_branch_protection(
+                repo_slug=repo_slug,
+                environment_name=environment_name,
+                default_branch=github["default_branch"],
+            )
 
         print()
         print(
