@@ -143,3 +143,17 @@ immediately. It first polls GitHub Actions for the matching
 `.foundation/level0-bootstrap.yaml` is treated as the completion marker for the
 bootstrap state migration. If this snapshot exists, `--resume` will preserve
 the generated backend files and remote-state configuration.
+
+
+## Fresh Azure RBAC propagation
+
+Generated Level 0 GitHub workflows explicitly wait for Azure control-plane
+authorization to become effective before running Terraform plans.
+
+This is required because Azure Resource Manager role assignment changes are
+eventually consistent. A newly created federated identity can authenticate
+successfully before its newly assigned Reader, Contributor, or RBAC
+Administrator permissions are usable.
+
+The readiness loops are bounded to 10 minutes and fail explicitly if Azure
+authorization never becomes effective.

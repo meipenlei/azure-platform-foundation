@@ -46,6 +46,29 @@ jobs:
             -backend-config=backend.hcl \
             -backend-config="use_cli=true"
 
+      - name: Wait for Azure control-plane RBAC propagation
+        shell: bash
+        run: |
+          resource_group_name="$(terraform output -raw resource_group_name)"
+
+          for attempt in {1..60}; do
+            if az group show \
+              --name "$resource_group_name" \
+              --subscription "${{ vars.AZURE_SUBSCRIPTION_ID }}" \
+              --only-show-errors \
+              --output none 2>/dev/null; then
+              echo "[PASS] Azure control-plane RBAC is effective."
+              exit 0
+            fi
+
+            echo "Azure control-plane RBAC is not effective yet; retrying..."
+            sleep 10
+          done
+
+          echo "[ERROR] Azure control-plane RBAC did not become effective within 10 minutes." >&2
+          exit 1
+
+
       - name: Terraform format check
         run: terraform fmt -check -recursive
 

@@ -51,6 +51,28 @@ jobs:
           echo "TF_VAR_governance_principal_id=$(terraform output -raw governance_identity_principal_id)" >> "$GITHUB_ENV"
           echo "TF_VAR_state_container_id=$(terraform output -raw state_container_id)" >> "$GITHUB_ENV"
 
+      - name: Wait for Azure governance RBAC propagation
+        shell: bash
+        run: |
+          scope="/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}"
+
+          for attempt in {1..60}; do
+            if az role assignment list \
+              --scope "$scope" \
+              --only-show-errors \
+              --output none 2>/dev/null; then
+              echo "[PASS] Azure governance RBAC is effective."
+              exit 0
+            fi
+
+            echo "Azure governance RBAC is not effective yet; retrying..."
+            sleep 10
+          done
+
+          echo "[ERROR] Azure governance RBAC did not become effective within 10 minutes." >&2
+          exit 1
+
+
       - name: Initialize Governance state
         working-directory: levels/level0/governance
         run: |

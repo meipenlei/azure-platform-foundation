@@ -177,5 +177,41 @@ class GreenfieldConfigurationTests(unittest.TestCase):
             )
 
 
+
+    def test_generated_workflow_templates_include_rbac_readiness(self) -> None:
+        public_repo = (
+            Path(__file__).resolve().parents[2]
+        )
+        template_root = (
+            public_repo
+            / "tooling"
+            / "customer-init"
+            / "templates"
+            / "github"
+        )
+
+        for name in (
+            "terraform-plan.yml.j2",
+            "terraform-apply.yml.j2",
+            "terraform-governance-plan.yml.j2",
+            "terraform-governance-apply.yml.j2",
+        ):
+            content = (
+                template_root
+                / name
+            ).read_text(encoding="utf-8")
+
+            self.assertIn(
+                "RBAC propagation",
+                content,
+                msg=name,
+            )
+            self.assertIn(
+                "for attempt in {1..60}",
+                content,
+                msg=name,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
