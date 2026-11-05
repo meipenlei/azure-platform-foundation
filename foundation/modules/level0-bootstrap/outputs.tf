@@ -62,3 +62,8 @@ output "github_governance_subject" {
   description = "GitHub OIDC subject used by the governance identity."
   value       = local.github_governance_subject
 }
+
+output "state_container_id" {
+  description = "Resource ID of the Terraform state container."
+  value       = azurerm_storage_container.tfstate.id
+}
