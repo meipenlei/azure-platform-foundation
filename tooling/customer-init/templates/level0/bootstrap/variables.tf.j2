@@ -1,0 +1,46 @@
+variable "tenant_id" {
+  type = string
+}
+
+variable "subscription_id" {
+  type = string
+}
+
+variable "location" {
+  type = string
+}
+
+variable "name_prefix" {
+  type = string
+}
+
+variable "github_owner" {
+  type = string
+}
+
+variable "github_owner_id" {
+  type = string
+}
+
+variable "github_repository" {
+  type = string
+}
+
+variable "github_repository_id" {
+  type = string
+}
+
+variable "github_apply_environment" {
+  type    = string
+  default = "apf-level0"
+}
+
+variable "github_governance_environment" {
+  type    = string
+  default = "apf-governance"
+}
+
+variable "tags" {
+  type    = map(string)
+  default = {}
+}

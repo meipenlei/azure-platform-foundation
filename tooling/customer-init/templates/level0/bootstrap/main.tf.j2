@@ -1,0 +1,19 @@
+module "bootstrap" {
+  source = "git::https://github.com/meipenlei/azure-platform-foundation.git//foundation/modules/level0-bootstrap?ref=[[ foundation_ref ]]"
+
+  tenant_id       = var.tenant_id
+  subscription_id = var.subscription_id
+
+  location    = var.location
+  name_prefix = var.name_prefix
+
+  github_owner         = var.github_owner
+  github_owner_id      = var.github_owner_id
+  github_repository    = var.github_repository
+  github_repository_id = var.github_repository_id
+
+  github_apply_environment      = var.github_apply_environment
+  github_governance_environment = var.github_governance_environment
+
+  tags = var.tags
+}
