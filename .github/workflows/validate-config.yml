@@ -137,7 +137,7 @@ jobs:
           config_dir = (
             Path(os.environ["RUNNER_TEMP"])
             / "apf-config"
-
+          )
           #
           # Smoke tests always consume the current development
           # version of the Foundation.
