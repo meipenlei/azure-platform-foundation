@@ -47,3 +47,18 @@ output "backend_configuration" {
 output "governance_identity_client_id" {
   value = azurerm_user_assigned_identity.governance.client_id
 }
+
+output "governance_identity_name" {
+  description = "Name of the Level 0 governance managed identity."
+  value       = azurerm_user_assigned_identity.governance.name
+}
+
+output "governance_identity_principal_id" {
+  description = "Principal ID of the Level 0 governance managed identity."
+  value       = azurerm_user_assigned_identity.governance.principal_id
+}
+
+output "github_governance_subject" {
+  description = "GitHub OIDC subject used by the governance identity."
+  value       = local.github_governance_subject
+}

@@ -20,6 +20,8 @@ locals {
 
   github_apply_subject = "${local.github_subject_prefix}:environment:${var.github_apply_environment}"
 
+  github_governance_subject = "${local.github_subject_prefix}:environment:${var.github_governance_environment}"
+
   tags = merge(
     {
       "managed-by" = "azure-platform-foundation"
