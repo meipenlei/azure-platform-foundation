@@ -96,3 +96,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "github_governance_environment" {
+  type    = string
+  default = "apf-governance"
+}

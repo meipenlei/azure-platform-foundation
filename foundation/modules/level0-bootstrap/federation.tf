@@ -25,3 +25,14 @@ resource "azurerm_federated_identity_credential" "github_apply" {
 
   subject = local.github_apply_subject
 }
+
+resource "azurerm_federated_identity_credential" "github_governance" {
+  name = "github-governance"
+
+  user_assigned_identity_id = azurerm_user_assigned_identity.governance.id
+
+  issuer   = "https://token.actions.githubusercontent.com"
+  audience = ["api://AzureADTokenExchange"]
+
+  subject = "${local.github_subject_prefix}:environment:${var.github_governance_environment}"
+}

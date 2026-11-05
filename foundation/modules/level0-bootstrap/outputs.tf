@@ -43,3 +43,7 @@ output "backend_configuration" {
     use_azuread_auth     = true
   }
 }
+
+output "governance_identity_client_id" {
+  value = azurerm_user_assigned_identity.governance.client_id
+}
