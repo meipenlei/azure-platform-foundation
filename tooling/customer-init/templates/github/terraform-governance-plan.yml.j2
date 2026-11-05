@@ -17,14 +17,14 @@ env:
 jobs:
   governance-plan:
     name: Governance Plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     environment:
       name: apf-governance
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4

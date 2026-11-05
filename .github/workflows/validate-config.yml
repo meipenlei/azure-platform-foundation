@@ -27,11 +27,11 @@ permissions:
 jobs:
   validate:
     name: Validate APF schemas and configuration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -90,7 +90,7 @@ jobs:
 
   customer-init-smoke-test:
     name: Customer Init Smoke Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       - validate
 
@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
         uses: actions/setup-python@v5
