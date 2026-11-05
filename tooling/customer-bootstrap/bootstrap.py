@@ -48,6 +48,7 @@ STATE_DATA_ROLE = "Storage Blob Data Contributor"
 
 BOOTSTRAP_STATE_KEY = "level0.bootstrap.tfstate"
 GOVERNANCE_STATE_KEY = "level0.governance.tfstate"
+BOOTSTRAP_SNAPSHOT = ".foundation/level0-bootstrap.yaml"
 
 BOOTSTRAP_BACKEND_TF = """\
 terraform {
@@ -999,36 +1000,98 @@ def remove_role_assignment(
     )
 
 
+def wait_for_state_data_access(
+    *,
+    storage_account_name: str,
+    container_name: str,
+) -> None:
+    """
+    Wait until Azure Storage data-plane RBAC is effective for the signed-in
+    bootstrap user.
+
+    Azure role assignment creation is an ARM control-plane operation. Blob
+    authorization can become effective later. Terraform backend migration must
+    not begin until a real Blob data-plane request succeeds.
+    """
+
+    print(
+        "Waiting for temporary Azure Storage data-plane access "
+        "to become effective..."
+    )
+
+    last_message = ""
+
+    for attempt in range(1, 37):
+        result = run_command(
+            [
+                "az",
+                "storage",
+                "blob",
+                "list",
+                "--account-name",
+                storage_account_name,
+                "--container-name",
+                container_name,
+                "--auth-mode",
+                "login",
+                "--num-results",
+                "1",
+                "--only-show-errors",
+                "--output",
+                "none",
+            ],
+            capture_output=True,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            print(
+                "[PASS] Azure Storage data-plane access is effective."
+            )
+            return
+
+        last_message = (
+            (result.stderr or result.stdout or "")
+            .strip()
+        )
+
+        if attempt < 36:
+            print(
+                "Azure Storage RBAC is not effective yet; retrying..."
+            )
+            time.sleep(10)
+
+    details = (
+        f"\n{last_message}"
+        if last_message
+        else ""
+    )
+
+    raise BootstrapError(
+        "Temporary Azure Storage data-plane access did not become "
+        f"effective.{details}"
+    )
+
+
 def migrate_bootstrap_state(
     bootstrap_dir: Path,
 ) -> None:
-    commands = [
-        [
-            "terraform",
-            "init",
-            "-migrate-state",
-            "-force-copy",
-            "-backend-config=backend.hcl",
-        ],
-        [
-            "terraform",
-            "init",
-            "-reconfigure",
-            "-backend-config=backend.hcl",
-        ],
-    ]
-
     last_error: BootstrapError | None = None
 
     for attempt in range(1, 7):
-        command = commands[0] if attempt == 1 else commands[1]
-
         try:
             run_command(
-                command,
+                [
+                    "terraform",
+                    "init",
+                    "-migrate-state",
+                    "-force-copy",
+                    "-backend-config=backend.hcl",
+                ],
                 cwd=bootstrap_dir,
             )
             return
+
         except BootstrapError as exc:
             last_error = exc
 
@@ -1036,9 +1099,9 @@ def migrate_bootstrap_state(
                 break
 
             print(
-                "Backend initialization is not ready yet; retrying..."
+                "Terraform backend migration is not ready yet; retrying..."
             )
-            time.sleep(5)
+            time.sleep(10)
 
     assert last_error is not None
     raise last_error
@@ -1253,6 +1316,134 @@ def verify_governance_state(
     )
 
 
+def optional_output_value(
+    outputs: dict[str, Any],
+    name: str,
+) -> Any:
+    entry = outputs.get(
+        name
+    )
+
+    if not isinstance(
+        entry,
+        dict,
+    ):
+        return None
+
+    return entry.get(
+        "value"
+    )
+
+
+def write_bootstrap_snapshot(
+    *,
+    project_dir: Path,
+    tenant_id: str,
+    subscription_id: str,
+    outputs: dict[str, Any],
+) -> None:
+    """
+    Persist non-sensitive Level 0 bootstrap identifiers for later lifecycle
+    stages.
+
+    This snapshot deliberately contains identifiers and OIDC subjects only.
+    It never contains tokens, passwords, client secrets, storage keys or
+    Terraform state.
+    """
+
+    fields = (
+        "resource_group_name",
+        "storage_account_name",
+        "state_container_name",
+        "state_container_id",
+        "plan_identity_client_id",
+        "apply_identity_client_id",
+        "governance_identity_client_id",
+        "governance_identity_name",
+        "governance_identity_principal_id",
+        "github_plan_subject",
+        "github_apply_subject",
+        "github_governance_subject",
+        "backend_configuration",
+    )
+
+    bootstrap: dict[str, Any] = {}
+
+    for field in fields:
+        value = optional_output_value(
+            outputs,
+            field,
+        )
+
+        if value not in (
+            None,
+            "",
+        ):
+            bootstrap[field] = value
+
+    required = (
+        "state_container_id",
+        "plan_identity_client_id",
+        "apply_identity_client_id",
+        "governance_identity_client_id",
+        "governance_identity_principal_id",
+        "github_plan_subject",
+        "github_apply_subject",
+        "github_governance_subject",
+    )
+
+    missing = [
+        name
+        for name in required
+        if not bootstrap.get(
+            name
+        )
+    ]
+
+    if missing:
+        raise BootstrapError(
+            "Unable to write Level 0 bootstrap metadata snapshot. "
+            "Missing Terraform outputs: "
+            + ", ".join(
+                missing
+            )
+        )
+
+    payload = {
+        "schema_version": "0.1",
+        "source": "terraform-bootstrap",
+        "azure": {
+            "tenant_id": tenant_id,
+            "subscription_id": subscription_id,
+        },
+        "bootstrap": bootstrap,
+    }
+
+    target = (
+        project_dir
+        / BOOTSTRAP_SNAPSHOT
+    )
+
+    target.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with target.open(
+        "w",
+        encoding="utf-8",
+    ) as handle:
+        yaml.safe_dump(
+            payload,
+            handle,
+            sort_keys=False,
+        )
+
+    print(
+        f"[PASS] Generated {BOOTSTRAP_SNAPSHOT}."
+    )
+
+
 def cleanup_plan(
     plan_path: Path,
 ) -> None:
@@ -1273,6 +1464,8 @@ def main() -> int:
     )
     print(f"Project: {project_dir}")
     print()
+
+    temporary_assignment_id: str | None = None
 
     try:
         require_command("terraform")
@@ -1416,42 +1609,42 @@ def main() -> int:
 
                 principal_id = get_signed_in_user_object_id()
 
-                temporary_assignment_id: str | None = None
-
-                try:
-                    temporary_assignment_id = (
-                        ensure_temporary_state_access(
-                            principal_id=principal_id,
-                            scope=state_container_id,
-                        )
+                temporary_assignment_id = (
+                    ensure_temporary_state_access(
+                        principal_id=principal_id,
+                        scope=state_container_id,
                     )
+                )
 
-                    print()
-                    print(
-                        "Migrating Level 0 bootstrap state to Azure..."
-                    )
+                wait_for_state_data_access(
+                    storage_account_name=backend["storage_account_name"],
+                    container_name=backend["container_name"],
+                )
 
-                    migrate_bootstrap_state(
-                        bootstrap_dir
-                    )
+                print()
+                print(
+                    "Migrating Level 0 bootstrap state to Azure..."
+                )
 
-                    print()
-                    print(
-                        "Verifying migrated remote state..."
-                    )
+                migrate_bootstrap_state(
+                    bootstrap_dir
+                )
 
-                    verify_remote_state(
-                        bootstrap_dir
-                    )
+                print()
+                print(
+                    "Verifying migrated remote state..."
+                )
 
-                finally:
-                    if (
-                        temporary_assignment_id
-                        and not args.keep_temporary_state_access
-                    ):
-                        remove_role_assignment(
-                            temporary_assignment_id
-                        )
+                verify_remote_state(
+                    bootstrap_dir
+                )
+
+            write_bootstrap_snapshot(
+                project_dir=project_dir,
+                tenant_id=tenant_id,
+                subscription_id=subscription_id,
+                outputs=outputs,
+            )
 
         if not args.governance:
             print()
@@ -1573,6 +1766,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
     except KeyboardInterrupt:
         print()
         print(
@@ -1580,6 +1774,22 @@ def main() -> int:
             file=sys.stderr,
         )
         return 130
+
+    finally:
+        if (
+            temporary_assignment_id
+            and not args.keep_temporary_state_access
+        ):
+            try:
+                remove_role_assignment(
+                    temporary_assignment_id
+                )
+            except BootstrapError as cleanup_error:
+                print(
+                    "[ERROR] Failed to remove temporary bootstrap "
+                    f"state access: {cleanup_error}",
+                    file=sys.stderr,
+                )
 
 
 if __name__ == "__main__":

@@ -160,3 +160,34 @@ A later stage can automate GitHub configuration:
 - validation of OIDC federation subjects
 - transition from local privileged bootstrap execution to normal GitHub
   plan/apply/governance pipelines
+
+
+## Commit 8 Greenfield handoff metadata
+
+After a successful `--apply`, customer-bootstrap writes:
+
+    .foundation/level0-bootstrap.yaml
+
+This file contains non-sensitive generated identifiers and OIDC subjects derived
+from the Terraform bootstrap outputs. It does not contain Terraform state,
+tokens, passwords, client secrets, storage keys, or private keys.
+
+Later lifecycle tools can use this metadata without requiring the local
+bootstrap operator to retain Azure Storage data-plane access.
+
+When a new Greenfield deployment requires temporary
+`Storage Blob Data Contributor` access, that access is retained through the
+optional governance handover and removed in a final cleanup step.
+
+
+## Azure Storage RBAC propagation
+
+A successful Azure role-assignment creation does not guarantee that the Blob
+data plane can immediately authorize the principal.
+
+Before Terraform state migration, customer-bootstrap now performs a real
+Microsoft Entra-authenticated Blob list request and waits until it succeeds.
+
+Terraform migration retries always continue to use `-migrate-state`; the tool
+never switches to a plain `-reconfigure` retry while local state is still
+authoritative.

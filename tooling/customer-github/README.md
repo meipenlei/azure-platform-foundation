@@ -161,3 +161,16 @@ For example, it does not yet choose:
 
 Those controls should become policy-driven configuration rather than hard-coded
 defaults.
+
+
+## Commit 8 bootstrap metadata
+
+When `.foundation/level0-bootstrap.yaml` exists, `customer-github` reads the
+required managed-identity client IDs and OIDC subjects from that generated
+metadata file.
+
+This means the local operator does not need persistent Azure Storage
+data-plane permissions merely to configure GitHub after bootstrap.
+
+For older APF repositories without the snapshot, the tool retains the existing
+Terraform remote-state fallback.

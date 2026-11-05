@@ -38,6 +38,8 @@ TERRAFORM_REQUIRED_VERSION_PREFIX = "Terraform v1.17."
 LEVEL0_ENVIRONMENT = "apf-level0"
 GOVERNANCE_ENVIRONMENT = "apf-governance"
 
+BOOTSTRAP_SNAPSHOT = ".foundation/level0-bootstrap.yaml"
+
 WORKFLOW_FILES = (
     "terraform-plan.yml",
     "terraform-apply.yml",
@@ -440,6 +442,92 @@ def discover_github_repository(
         "repository_id": repository_id,
         "default_branch": default_branch,
     }
+
+
+def snapshot_bootstrap_outputs(
+    project_dir: Path,
+) -> dict[str, Any] | None:
+    path = (
+        project_dir
+        / BOOTSTRAP_SNAPSHOT
+    )
+
+    if not path.is_file():
+        return None
+
+    payload = load_yaml(
+        path
+    )
+
+    bootstrap = payload.get(
+        "bootstrap"
+    )
+
+    if not isinstance(
+        bootstrap,
+        dict,
+    ):
+        raise GitHubConfigurationError(
+            f"{BOOTSTRAP_SNAPSHOT} does not contain a bootstrap object."
+        )
+
+    outputs: dict[str, Any] = {}
+
+    for name, value in bootstrap.items():
+        outputs[str(name)] = {
+            "value": value,
+        }
+
+    required = (
+        "plan_identity_client_id",
+        "apply_identity_client_id",
+        "governance_identity_client_id",
+        "github_plan_subject",
+        "github_apply_subject",
+        "github_governance_subject",
+    )
+
+    missing = [
+        name
+        for name in required
+        if name not in outputs
+    ]
+
+    if missing:
+        raise GitHubConfigurationError(
+            f"{BOOTSTRAP_SNAPSHOT} is missing required fields: "
+            + ", ".join(
+                missing
+            )
+        )
+
+    print(
+        f"[PASS] Bootstrap outputs loaded from {BOOTSTRAP_SNAPSHOT}."
+    )
+
+    return outputs
+
+
+def load_bootstrap_outputs(
+    *,
+    project_dir: Path,
+    bootstrap_dir: Path,
+) -> dict[str, Any]:
+    snapshot = snapshot_bootstrap_outputs(
+        project_dir
+    )
+
+    if snapshot is not None:
+        return snapshot
+
+    print(
+        "[INFO] Bootstrap metadata snapshot is not present. "
+        "Falling back to Terraform remote state."
+    )
+
+    return terraform_bootstrap_outputs(
+        bootstrap_dir
+    )
 
 
 def terraform_bootstrap_outputs(
@@ -1350,13 +1438,25 @@ def main() -> int:
         require_command(
             "gh"
         )
-        require_command(
-            "terraform"
-        )
 
         bootstrap_dir = verify_project_structure(
             project_dir
         )
+
+        snapshot_path = (
+            project_dir
+            / BOOTSTRAP_SNAPSHOT
+        )
+
+        if snapshot_path.is_file():
+            print(
+                "[PASS] Bootstrap metadata snapshot found; "
+                "local Terraform state access is not required."
+            )
+        else:
+            require_command(
+                "terraform"
+            )
 
         verify_workflow_contract(
             project_dir
@@ -1372,7 +1472,10 @@ def main() -> int:
         )
 
         print("Preflight checks...")
-        verify_terraform_version()
+
+        if not snapshot_path.is_file():
+            verify_terraform_version()
+
         verify_github_authentication()
 
         github = discover_github_repository(
@@ -1388,8 +1491,9 @@ def main() -> int:
         print()
         print("Reading Level 0 bootstrap outputs...")
 
-        outputs = terraform_bootstrap_outputs(
-            bootstrap_dir
+        outputs = load_bootstrap_outputs(
+            project_dir=project_dir,
+            bootstrap_dir=bootstrap_dir,
         )
 
         print()

@@ -1,0 +1,79 @@
+name: Greenfield E2E Tool Smoke Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "tooling/greenfield-e2e/**"
+      - "tooling/customer-bootstrap/**"
+      - "tooling/customer-github/**"
+      - ".github/workflows/greenfield-e2e-smoke.yml"
+
+  pull_request:
+    paths:
+      - "tooling/greenfield-e2e/**"
+      - "tooling/customer-bootstrap/**"
+      - "tooling/customer-github/**"
+      - ".github/workflows/greenfield-e2e-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: greenfield-e2e-tooling
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -r tooling/customer-bootstrap/requirements.txt \
+            -r tooling/customer-github/requirements.txt \
+            -r tooling/greenfield-e2e/requirements.txt
+
+      - name: Compile lifecycle tooling
+        run: |
+          python -m py_compile \
+            tooling/customer-bootstrap/bootstrap.py \
+            tooling/customer-github/configure.py \
+            tooling/greenfield-e2e/validate.py \
+            tooling/greenfield-e2e/test_validate.py
+
+      - name: Run Greenfield E2E unit tests
+        run: |
+          python -m unittest discover \
+            -s tooling/greenfield-e2e \
+            -p "test_*.py"
+
+      - name: Verify Greenfield E2E CLI
+        run: |
+          python tooling/greenfield-e2e/validate.py \
+            --help > "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          grep -- "--source-config-dir" \
+            "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          grep -- "--github-owner" \
+            "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          grep -- "--output-dir" \
+            "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          grep -- "--apply" \
+            "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          grep -- "--resume" \
+            "$RUNNER_TEMP/greenfield-e2e-help.txt"
+
+          echo "[PASS] Greenfield E2E CLI is available."
