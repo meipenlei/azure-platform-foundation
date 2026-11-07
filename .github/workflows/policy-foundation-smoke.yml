@@ -1,0 +1,60 @@
+name: Policy Foundation Smoke Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "foundation/policy/**"
+      - "foundation/modules/level0-governance/**"
+      - "tooling/policy/**"
+      - "docs/architecture/governance-as-code.md"
+      - "docs/migration/hci-foundation01-policy-inventory.md"
+      - ".github/workflows/policy-foundation-smoke.yml"
+
+  pull_request:
+    paths:
+      - "foundation/policy/**"
+      - "foundation/modules/level0-governance/**"
+      - "tooling/policy/**"
+      - "docs/architecture/governance-as-code.md"
+      - "docs/migration/hci-foundation01-policy-inventory.md"
+      - ".github/workflows/policy-foundation-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: gov-as-code-foundation
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Compile policy tooling
+        run: |
+          python -m py_compile             tooling/policy/inventory.py             tooling/policy/validate.py             tooling/policy/test_inventory.py
+
+      - name: Run policy tooling unit tests
+        run: |
+          python -m unittest discover             -s tooling/policy             -p "test_*.py"
+
+      - name: Validate APF policy foundation
+        run: |
+          python tooling/policy/validate.py
+
+      - name: Validate PowerShell version and EPAC module
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion -lt [version]"7.4.0") {
+            throw "PowerShell 7.4 or newer is required."
+          }
+
+          ./tooling/policy/Install-Epac.ps1

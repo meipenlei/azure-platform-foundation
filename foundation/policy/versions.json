@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "epac": {
+    "module": "EnterprisePolicyAsCode",
+    "version": "11.5.11",
+    "minimum_powershell": "7.4"
+  },
+  "azure_landing_zones_library": {
+    "alz_tag": "platform/alz/2026.11.0",
+    "slz_tag": "platform/slz/2026.11.0",
+    "version_strategy": "pinned"
+  },
+  "desired_state": {
+    "brownfield_default": "ownedOnly",
+    "greenfield_target": "full"
+  }
+}

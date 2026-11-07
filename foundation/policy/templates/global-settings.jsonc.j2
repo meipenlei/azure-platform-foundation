@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Azure/enterprise-azure-policy-as-code/main/Schemas/global-settings-schema.json",
+  "telemetryOptOut": true,
+  "pacOwnerId": "[[ pac_owner_id ]]",
+  "pacEnvironments": [
+    {
+      "pacSelector": "[[ pac_selector ]]",
+      "cloud": "[[ azure_cloud ]]",
+      "tenantId": "[[ tenant_id ]]",
+      "deploymentRootScope": "[[ deployment_root_scope ]]",
+      "managedIdentityLocation": "[[ managed_identity_location ]]",
+      "skipResourceValidationForExemptions": false,
+      "desiredState": {
+        "strategy": "[[ desired_state_strategy ]]",
+        "keepDfcSecurityAssignments": false,
+        "doNotDisableDeprecatedPolicies": false,
+        "manageChildScopeDefinitions": false
+      }
+    }
+  ]
+}
