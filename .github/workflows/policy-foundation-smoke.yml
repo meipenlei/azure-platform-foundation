@@ -9,7 +9,7 @@ on:
       - "foundation/modules/level0-governance/**"
       - "tooling/policy/**"
       - "docs/architecture/governance-as-code.md"
-      - "docs/migration/hci-foundation01-policy-inventory.md"
+      - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
   pull_request:
@@ -18,7 +18,7 @@ on:
       - "foundation/modules/level0-governance/**"
       - "tooling/policy/**"
       - "docs/architecture/governance-as-code.md"
-      - "docs/migration/hci-foundation01-policy-inventory.md"
+      - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
 permissions:
@@ -40,11 +40,19 @@ jobs:
 
       - name: Compile policy tooling
         run: |
-          python -m py_compile             tooling/policy/inventory.py             tooling/policy/validate.py             tooling/policy/test_inventory.py
+          python -m py_compile \
+            tooling/policy/inventory.py \
+            tooling/policy/migrate_legacy.py \
+            tooling/policy/prepare_upstream.py \
+            tooling/policy/validate.py \
+            tooling/policy/test_inventory.py \
+            tooling/policy/test_migrate_legacy.py
 
       - name: Run policy tooling unit tests
         run: |
-          python -m unittest discover             -s tooling/policy             -p "test_*.py"
+          python -m unittest discover \
+            -s tooling/policy \
+            -p "test_*.py"
 
       - name: Validate APF policy foundation
         run: |

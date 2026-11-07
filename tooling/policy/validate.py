@@ -8,6 +8,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_ROOT = REPO_ROOT / "foundation" / "policy"
+MIGRATION_MAP = (
+    POLICY_ROOT
+    / "migration"
+    / "hci-foundation01-map.json"
+)
+
+VALID_CLASSIFICATIONS = {
+    "UPSTREAM",
+    "APF_CUSTOM",
+    "REVIEW",
+    "OBSOLETE",
+}
 
 
 class ValidationError(RuntimeError):
@@ -24,7 +36,7 @@ def load_json(path: Path) -> dict:
     return data
 
 
-def validate_versions() -> None:
+def validate_versions() -> dict:
     versions = load_json(POLICY_ROOT / "versions.json")
 
     epac = versions.get("epac", {})
@@ -48,6 +60,8 @@ def validate_versions() -> None:
         raise ValidationError(
             "Greenfield target must be explicit full ownership."
         )
+
+    return versions
 
 
 def validate_global_settings_template() -> None:
@@ -92,14 +106,45 @@ def validate_library_json() -> None:
         load_json(path)
 
 
+def validate_migration_map(versions: dict) -> None:
+    migration = load_json(MIGRATION_MAP)
+
+    upstream = migration.get("upstream", {})
+    version_library = versions["azure_landing_zones_library"]
+
+    if upstream.get("alz_tag") != version_library.get("alz_tag"):
+        raise ValidationError(
+            "Migration map ALZ tag does not match versions.json."
+        )
+    if upstream.get("slz_tag") != version_library.get("slz_tag"):
+        raise ValidationError(
+            "Migration map SLZ tag does not match versions.json."
+        )
+
+    manual = migration.get("manual_classifications", {})
+    for asset_type, decisions in manual.items():
+        if not isinstance(decisions, dict):
+            raise ValidationError(
+                f"Migration decisions for {asset_type} must be an object."
+            )
+        for name, decision in decisions.items():
+            classification = decision.get("classification")
+            if classification not in VALID_CLASSIFICATIONS:
+                raise ValidationError(
+                    f"Invalid migration classification "
+                    f"{classification!r} for {asset_type}/{name}."
+                )
+
+
 def main() -> int:
     try:
-        validate_versions()
+        versions = validate_versions()
         validate_global_settings_template()
         validate_library_json()
+        validate_migration_map(versions)
         print("[PASS] APF policy foundation validation.")
         return 0
-    except (ValidationError, OSError) as exc:
+    except (ValidationError, OSError, KeyError) as exc:
         print(f"[ERROR] {exc}")
         return 1
 

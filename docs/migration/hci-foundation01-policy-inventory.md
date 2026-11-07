@@ -3,7 +3,7 @@
 **Source repository:** `meipenlei/hci-foundation01`  
 **Branch:** `feature_mj`  
 **Source path:** `configuration/level1/alz/es/lib`  
-**Status:** inventory only; no policy asset has been migrated by Commit 9.
+**Status:** migration source; no legacy policy asset is deployed by Commit 10.
 
 ## Inventory
 
@@ -45,8 +45,7 @@ Examples include:
 - `Audit-ResourceRGLocation`
 - `Deny-Subnet-Without-Nsg`
 
-These assets must be resolved against the pinned current ALZ/SLZ releases
-before migration.
+Commit 10 resolves those assets against the pinned current ALZ/SLZ releases.
 
 ## Valuable design knowledge
 
@@ -61,16 +60,20 @@ The library contains deliberate governance decisions such as:
 - custom `security`, `public`, `confidential-corp` and
   `confidential-online` archetypes.
 
-These decisions will be preserved even when the underlying Microsoft policy
-asset is replaced by a newer upstream version.
+The Commit 10 migration tool compares assignment semantics so these decisions
+remain visible even when Microsoft now supplies the underlying policy asset.
 
 ## Migration classes
 
-Every legacy asset will eventually receive one of these classifications:
+Every legacy asset is classified into:
 
     UPSTREAM
     APF_CUSTOM
     REVIEW
     OBSOLETE
 
-Commit 9 intentionally does not bulk-copy the legacy library.
+The curated migration map lives at:
+
+    foundation/policy/migration/hci-foundation01-map.json
+
+No legacy asset is bulk-copied into the APF library.

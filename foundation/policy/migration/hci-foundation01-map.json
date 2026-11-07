@@ -1,0 +1,297 @@
+{
+  "schema_version": "0.1",
+  "source": {
+    "repository": "meipenlei/hci-foundation01",
+    "ref": "feature_mj",
+    "library_path": "configuration/level1/alz/es/lib",
+    "expected_counts": {
+      "archetype_definitions": 14,
+      "policy_assignments": 91,
+      "policy_definitions": 3,
+      "policy_set_definitions": 2,
+      "role_definitions": 1
+    }
+  },
+  "upstream": {
+    "repository": "Azure/Azure-Landing-Zones-Library",
+    "alz_tag": "platform/alz/2026.11.0",
+    "slz_tag": "platform/slz/2026.11.0"
+  },
+  "aliases": {
+    "policy_assignments": {
+      "CAF-Deny-Public-IP": {
+        "target": "Deny-Public-IP",
+        "source": "alz"
+      },
+      "CAF-Deny-Subnet-No-Nsg": {
+        "target": "Deny-Subnet-Without-Nsg",
+        "source": "alz"
+      },
+      "CAF-Depl-AzActivity-Log": {
+        "target": "Deploy-AzActivity-Log",
+        "source": "alz"
+      },
+      "CAF-Deploy-AzSqlDb-Audit": {
+        "target": "Deploy-AzSqlDb-Auditing",
+        "source": "alz"
+      },
+      "CAF-Depl-MDFC-DefSQL-AMA": {
+        "target": "Deploy-MDFC-DefSQL-AMA",
+        "source": "alz"
+      },
+      "CAF-Depl-VM-ChangeTrack": {
+        "target": "Deploy-VM-ChangeTrack",
+        "source": "alz"
+      },
+      "CAF-Deploy-VM-Monitoring": {
+        "target": "Deploy-VM-Monitoring",
+        "source": "alz"
+      },
+      "CAF-Depl-vmArc-ChangeTrk": {
+        "target": "Deploy-vmArc-ChangeTrack",
+        "source": "alz"
+      },
+      "CAF-Depl-vmHybr-Mon": {
+        "target": "Deploy-vmHybr-Monitoring",
+        "source": "alz"
+      },
+      "CAF-Depl-VMSS-ChangeTrk": {
+        "target": "Deploy-VMSS-ChangeTrack",
+        "source": "alz"
+      },
+      "CAF-Deploy-VMSS-Mon": {
+        "target": "Deploy-VMSS-Monitoring",
+        "source": "alz"
+      }
+    },
+    "policy_definitions": {
+      "CAF-Deny-Subnet-Without-Nsg": {
+        "target": "Deny-Subnet-Without-Nsg",
+        "source": "alz"
+      },
+      "CAF-Deny-Subnet-Without-Udr": {
+        "target": "Deny-Subnet-Without-Udr",
+        "source": "alz"
+      }
+    },
+    "archetype_definitions": {
+      "es_connectivity": {
+        "target": "connectivity",
+        "source": "alz"
+      },
+      "es_corp": {
+        "target": "corp",
+        "source": "alz"
+      },
+      "es_decommissioned": {
+        "target": "decommissioned",
+        "source": "alz"
+      },
+      "es_identity": {
+        "target": "identity",
+        "source": "alz"
+      },
+      "es_landing_zones": {
+        "target": "landing_zones",
+        "source": "alz"
+      },
+      "es_management": {
+        "target": "management",
+        "source": "alz"
+      },
+      "es_online": {
+        "target": "online",
+        "source": "alz"
+      },
+      "es_platform": {
+        "target": "platform",
+        "source": "alz"
+      },
+      "es_root": {
+        "target": "root",
+        "source": "alz"
+      },
+      "es_sandboxes": {
+        "target": "sandbox",
+        "source": "alz"
+      }
+    }
+  },
+  "manual_classifications": {
+    "policy_assignments": {
+      "CAF-Deny-Subnet-No-Udr": {
+        "classification": "APF_CUSTOM",
+        "reason": "Current ALZ contains the policy definition but no equivalent assignment. Preserve the APF audit-first assignment as an overlay.",
+        "candidates": [
+          {
+            "source": "alz",
+            "asset_type": "policy_definitions",
+            "name": "Deny-Subnet-Without-Udr"
+          }
+        ]
+      },
+      "CAF-Deny-CompliantTag": {
+        "classification": "APF_CUSTOM",
+        "reason": "Legacy APF-specific tag initiative assignment has no direct current ALZ/SLZ assignment."
+      },
+      "CAF-Modify-InheritTag": {
+        "classification": "APF_CUSTOM",
+        "reason": "Legacy APF-specific inherited-tag initiative assignment has no direct current ALZ/SLZ assignment."
+      },
+      "Deny-Private-DNS-Zones": {
+        "classification": "APF_CUSTOM",
+        "reason": "Current ALZ contains the custom policy definition but no equivalent assignment. Preserve the assignment behavior as an APF overlay.",
+        "candidates": [
+          {
+            "source": "alz",
+            "asset_type": "policy_definitions",
+            "name": "Deny-Private-DNS-Zones"
+          }
+        ]
+      },
+      "CAF-Deploy-SOV-CONF": {
+        "classification": "REVIEW",
+        "reason": "Legacy sovereignty baseline model must be compared with the current SLZ control architecture before migration.",
+        "candidates": [
+          {
+            "source": "slz",
+            "asset_type": "policy_assignments",
+            "name": "Enforce-Sov-L3-Conf"
+          }
+        ]
+      },
+      "CAF-Deploy-SOV-GLOBAL": {
+        "classification": "REVIEW",
+        "reason": "Legacy sovereignty baseline model must be mapped to the current SLZ L1/L2/L3 control model.",
+        "candidates": [
+          {
+            "source": "slz",
+            "asset_type": "policy_assignments",
+            "name": "Enforce-Sov-L1-Regions"
+          }
+        ]
+      },
+      "CAF-Deploy-Diag-Logs": {
+        "classification": "REVIEW",
+        "reason": "Current ALZ uses a newer diagnostic-log assignment model. Parameters and initiative semantics require review.",
+        "candidates": [
+          {
+            "source": "alz",
+            "asset_type": "policy_assignments",
+            "name": "Deploy-Diag-LogsCat"
+          }
+        ]
+      },
+      "CAF-Depl-ISO-27001-2013": {
+        "classification": "REVIEW",
+        "reason": "Legacy ISO 27001:2013 assignment must not be carried forward without checking the current compliance standard and built-in initiative."
+      },
+      "CAF-Deploy-Log-Analytics": {
+        "classification": "REVIEW",
+        "reason": "Legacy Log Analytics deployment assignment has no direct current ALZ assignment and may be superseded by newer monitoring patterns."
+      },
+      "CAF-Deploy-MDFC-Config": {
+        "classification": "REVIEW",
+        "reason": "Current ALZ contains a newer MDFC configuration assignment. Semantic and parameter migration is required.",
+        "candidates": [
+          {
+            "source": "alz",
+            "asset_type": "policy_assignments",
+            "name": "Deploy-MDFC-Config-H224"
+          }
+        ]
+      },
+      "CAF-Depl-VNet-FlowLogs1": {
+        "classification": "REVIEW",
+        "reason": "Legacy custom VNet flow-log deployment must be checked against current Azure and ALZ guidance before reuse."
+      },
+      "CAF-Depl-VNet-FlowLogs2": {
+        "classification": "REVIEW",
+        "reason": "Legacy custom VNet flow-log deployment must be checked against current Azure and ALZ guidance before reuse."
+      },
+      "CAF-Sec-Baseline-Linux": {
+        "classification": "REVIEW",
+        "reason": "Legacy security-baseline built-in reference requires current-policy replacement validation."
+      },
+      "CAF-Sec-Baseline-MS": {
+        "classification": "REVIEW",
+        "reason": "Legacy Microsoft-services security baseline requires current-policy replacement validation."
+      },
+      "CAF-Sec-Baseline-Win": {
+        "classification": "REVIEW",
+        "reason": "Legacy Windows security-baseline built-in reference requires current-policy replacement validation."
+      },
+      "Deploy-AKS-Policy": {
+        "classification": "REVIEW",
+        "reason": "Legacy AKS policy assignment is no longer represented by the same ALZ assignment name and needs semantic review."
+      },
+      "Deploy-Guest-Config": {
+        "classification": "REVIEW",
+        "reason": "Legacy Guest Configuration assignment must be compared with the current ALZ Guest Attestation model.",
+        "candidates": [
+          {
+            "source": "alz",
+            "asset_type": "policy_assignments",
+            "name": "Deploy-GuestAttest"
+          }
+        ]
+      }
+    },
+    "policy_definitions": {
+      "CAF-Deploy-VNet-FlowLogs": {
+        "classification": "REVIEW",
+        "reason": "Custom flow-log policy requires current Azure capability and lifecycle review before migration."
+      }
+    },
+    "policy_set_definitions": {
+      "CAF-Deny-CompliantTag": {
+        "classification": "APF_CUSTOM",
+        "reason": "APF-specific compliant-tag initiative with no direct current ALZ/SLZ equivalent."
+      },
+      "CAF-Modify-InheritTag": {
+        "classification": "APF_CUSTOM",
+        "reason": "APF-specific inherited-tag initiative with no direct current ALZ/SLZ equivalent."
+      }
+    },
+    "role_definitions": {
+      "CAF-network-vhub-peering": {
+        "classification": "REVIEW",
+        "reason": "Custom role belongs to the connectivity/RBAC boundary and must be reviewed before moving into the APF Level 2 permission model."
+      }
+    },
+    "archetype_definitions": {
+      "confidential-corp": {
+        "classification": "REVIEW",
+        "reason": "Legacy confidential profile should be reconciled with the current SLZ control hierarchy rather than copied directly.",
+        "candidates": [
+          {
+            "source": "slz",
+            "asset_type": "archetype_definitions",
+            "name": "sovereign_l2_controls"
+          },
+          {
+            "source": "slz",
+            "asset_type": "archetype_definitions",
+            "name": "sovereign_l3_controls"
+          }
+        ]
+      },
+      "confidential-online": {
+        "classification": "REVIEW",
+        "reason": "Legacy confidential profile should be reconciled with the current SLZ control hierarchy rather than copied directly.",
+        "candidates": [
+          {
+            "source": "slz",
+            "asset_type": "archetype_definitions",
+            "name": "sovereign_l2_controls"
+          },
+          {
+            "source": "slz",
+            "asset_type": "archetype_definitions",
+            "name": "sovereign_l3_controls"
+          }
+        ]
+      }
+    }
+  }
+}
