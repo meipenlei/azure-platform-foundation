@@ -1209,6 +1209,7 @@ def terraform_init_governance(
         [
             "terraform",
             "init",
+            "-upgrade",
             "-reconfigure",
             "-backend-config=backend.hcl",
         ],
