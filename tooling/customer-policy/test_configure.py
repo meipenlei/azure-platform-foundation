@@ -194,7 +194,7 @@ class ConfigureTests(unittest.TestCase):
             with self.assertRaises(configure.ConfigureError):
                 configure.validate_profile(profile, level1)
 
-    def test_workflow_remains_plan_only(self) -> None:
+    def test_plan_and_apply_workflows_keep_identity_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             project = self.make_project(Path(temp))
             customer, _, discovery, level1 = configure.verify_project(project)
@@ -206,11 +206,52 @@ class ConfigureTests(unittest.TestCase):
                 discovery=discovery,
                 level1=level1,
             )
-            workflow = files[project / ".github/workflows/policy-plan.yml"]
-            self.assertIn("AZURE_PLAN_CLIENT_ID", workflow)
-            self.assertIn("Build-DeploymentPlans", workflow)
-            self.assertNotIn("Deploy-PolicyPlan", workflow)
-            self.assertNotIn("Deploy-RolesPlan", workflow)
+
+            plan = files[project / ".github/workflows/policy-plan.yml"]
+            apply = files[project / ".github/workflows/policy-apply.yml"]
+            metadata = yaml.safe_load(
+                files[project / ".foundation/policy.yaml"]
+            )
+            guard = files[
+                project / "governance/policy/tooling/verify_apply_plan.py"
+            ]
+
+            self.assertIn("AZURE_PLAN_CLIENT_ID", plan)
+            self.assertIn("Build-DeploymentPlans", plan)
+            self.assertNotIn("Deploy-PolicyPlan", plan)
+            self.assertNotIn("Deploy-RolesPlan", plan)
+            self.assertIn("policy-apply.yml", plan)
+
+            self.assertIn("workflow_dispatch", apply)
+            self.assertIn("AZURE_GOVERNANCE_CLIENT_ID", apply)
+            self.assertIn("environment:\n      name: apf-governance", apply)
+            self.assertIn("Deploy-PolicyPlan", apply)
+            self.assertIn("Deploy-RolesPlan", apply)
+            self.assertIn("governance/policy/tooling/verify_apply_plan.py", apply)
+            self.assertIn("--mode pre-apply", apply)
+            self.assertIn("--mode post-apply", apply)
+            self.assertNotIn("AZURE_PLAN_CLIENT_ID", apply)
+            self.assertIn("Protected apply", guard)
+
+            self.assertEqual(metadata["mode"], "protected_apply")
+            self.assertEqual(
+                metadata["ci_cd"]["apply_environment"],
+                "apf-governance",
+            )
+            self.assertEqual(
+                metadata["ci_cd"]["apply_guard"],
+                "additive_assignments_only",
+            )
+
+    def test_profile_rejects_assignment_names_over_24_chars(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = self.make_project(Path(temp))
+            _, _, _, level1 = configure.verify_project(project)
+            profile = self.profile()
+            profile["assignments"][0]["assignment"]["name"] = "x" * 25
+
+            with self.assertRaises(configure.ConfigureError):
+                configure.validate_profile(profile, level1)
 
 
 if __name__ == "__main__":

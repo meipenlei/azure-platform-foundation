@@ -3,7 +3,8 @@
 This tool generates the EPAC desired-state configuration in an existing APF
 customer repository.
 
-Commit 14 introduces the first **scope-aware Audit-First Wave 1**.
+Commit 15 adds the first **protected Policy Apply** path without expanding the
+Wave 1 policy content.
 
 ## Required Level 1 input
 
@@ -29,18 +30,34 @@ There is no scope fallback and no inferred `security` mapping.
 These assignments use built-in policy definitions and require no managed
 identity or policy-assignment RBAC.
 
-## Safety model
+## CI/CD boundary
 
-The generated policy workflow:
+The generated plan workflow:
 
-- runs on pull requests only;
+- runs on pull requests;
 - authenticates with `AZURE_PLAN_CLIENT_ID`;
 - uses OIDC;
-- invokes `Build-DeploymentPlans`;
-- never invokes `Deploy-PolicyPlan`;
-- never invokes `Deploy-RolesPlan`.
+- invokes `Build-DeploymentPlans` only;
+- never invokes `Deploy-PolicyPlan` or `Deploy-RolesPlan`.
 
-The Governance UAMI is still not used by the policy-plan workflow.
+The generated apply workflow:
+
+- is `workflow_dispatch` only;
+- accepts execution only from `main`;
+- uses the `apf-governance` GitHub environment;
+- authenticates with `AZURE_GOVERNANCE_CLIENT_ID` via OIDC;
+- rebuilds the EPAC plan immediately before deployment;
+- verifies the plan with the generated APF apply guard;
+- calls `Deploy-PolicyPlan` and then `Deploy-RolesPlan`;
+- rebuilds the plan after deployment and requires zero remaining changes.
+
+The apply guard allows only **new Policy Assignments that already exist in the
+generated Definitions tree**. It rejects assignment updates/replaces/deletes,
+Policy Definitions, Policy Set Definitions, exemptions, enrollments and all
+role-assignment changes.
+
+This boundary is intentionally narrower than EPAC's full capability. DINE,
+Modify and assignment-role reconciliation remain deferred.
 
 ## Dry run
 
@@ -54,6 +71,15 @@ The Governance UAMI is still not used by the policy-plan workflow.
       --apply
 
 The command is deterministic and idempotent.
+
+## Generated apply tooling
+
+The configurator copies the versioned guard into the customer repository:
+
+    governance/policy/tooling/verify_apply_plan.py
+
+The customer workflow therefore does not download or execute mutable APF
+runtime code during an apply.
 
 ## Deliberately deferred
 

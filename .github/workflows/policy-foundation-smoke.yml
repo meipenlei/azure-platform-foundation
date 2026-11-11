@@ -11,6 +11,8 @@ on:
       - "tooling/customer-policy/**"
       - "docs/architecture/governance-as-code.md"
       - "docs/architecture/policy-plan-pilot.md"
+      - "docs/architecture/policy-audit-first-wave1.md"
+      - "docs/architecture/policy-protected-apply.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -22,6 +24,8 @@ on:
       - "tooling/customer-policy/**"
       - "docs/architecture/governance-as-code.md"
       - "docs/architecture/policy-plan-pilot.md"
+      - "docs/architecture/policy-audit-first-wave1.md"
+      - "docs/architecture/policy-protected-apply.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -57,7 +61,9 @@ jobs:
             tooling/policy/test_inventory.py \
             tooling/policy/test_migrate_legacy.py \
             tooling/customer-policy/configure.py \
-            tooling/customer-policy/test_configure.py
+            tooling/customer-policy/verify_apply_plan.py \
+            tooling/customer-policy/test_configure.py \
+            tooling/customer-policy/test_verify_apply_plan.py
 
       - name: Run policy tooling unit tests
         run: |

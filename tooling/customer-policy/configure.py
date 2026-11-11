@@ -25,9 +25,11 @@ PROFILE_PATH = (
 
 PAC_SELECTOR = "apf-governance"
 LEVEL1_SNAPSHOT = ".foundation/level1-management-groups.yaml"
+APPLY_GUARD_SOURCE = Path(__file__).with_name("verify_apply_plan.py")
 MANAGEMENT_GROUP_SCOPE_PREFIX = (
     "/providers/Microsoft.Management/managementGroups/"
 )
+POLICY_ASSIGNMENT_NAME_MAX_LENGTH = 24
 
 CLOUD_MAP = {
     "public": "AzureCloud",
@@ -43,7 +45,7 @@ class ConfigureError(RuntimeError):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate the APF EPAC plan-only desired state in an existing "
+            "Generate the APF EPAC desired state and protected apply workflow in an existing "
             "customer repository."
         )
     )
@@ -233,6 +235,13 @@ def validate_profile(
             raise ConfigureError(
                 f"Azure policy assignment name is invalid or duplicate: "
                 f"{assignment_name!r}"
+            )
+        if len(assignment_name) > POLICY_ASSIGNMENT_NAME_MAX_LENGTH:
+            raise ConfigureError(
+                f"Azure policy assignment name {assignment_name!r} is "
+                f"{len(assignment_name)} characters long; management-group "
+                f"assignments are limited to "
+                f"{POLICY_ASSIGNMENT_NAME_MAX_LENGTH} characters."
             )
 
         assignment_scope(level1, assignment)
@@ -439,7 +448,7 @@ def render_policy_metadata(
     data = {
         "schema_version": "0.1",
         "generator": "apf-customer-policy",
-        "mode": "plan_only",
+        "mode": "protected_apply",
         "pac_owner_id": owner_id,
         "pac_selector": PAC_SELECTOR,
         "deployment_root_scope": deployment_root_scope(level1),
@@ -452,6 +461,12 @@ def render_policy_metadata(
             "assignment_count": len(profile["assignments"]),
         },
         "assignment_scopes": scopes,
+        "ci_cd": {
+            "plan_workflow": ".github/workflows/policy-plan.yml",
+            "apply_workflow": ".github/workflows/policy-apply.yml",
+            "apply_environment": "apf-governance",
+            "apply_guard": "additive_assignments_only",
+        },
         "toolchain": {
             "epac": versions["epac"]["version"],
             "alz": versions["azure_landing_zones_library"]["alz_tag"],
@@ -462,7 +477,7 @@ def render_policy_metadata(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def render_workflow(
+def render_plan_workflow(
     *,
     customer: dict[str, Any],
     versions: dict[str, Any],
@@ -479,6 +494,7 @@ on:
       - ".foundation/policy.yaml"
       - ".foundation/level1-management-groups.yaml"
       - ".github/workflows/policy-plan.yml"
+      - ".github/workflows/policy-apply.yml"
 
 permissions:
   contents: read
@@ -548,6 +564,167 @@ jobs:
 '''
 
 
+def render_apply_workflow(
+    *,
+    customer: dict[str, Any],
+    versions: dict[str, Any],
+) -> str:
+    epac_version = versions["epac"]["version"]
+    azure_environment = CLOUD_MAP[customer["azure"]["cloud"]]
+
+    return f'''name: Policy Desired State Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_apply:
+        description: "Confirm deployment of the current main-branch policy desired state"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_CORE_OUTPUT: "none"
+  EPAC_VERSION: "{epac_version}"
+  PAC_SELECTOR: "{PAC_SELECTOR}"
+  POLICY_DEFINITIONS_ROOT: "${{{{ github.workspace }}}}/governance/policy/Definitions"
+  POLICY_OUTPUT: "${{{{ github.workspace }}}}/governance/policy/Output"
+  POLICY_POST_APPLY_OUTPUT: "${{{{ github.workspace }}}}/governance/policy/PostApplyOutput"
+
+jobs:
+  policy-apply:
+    name: EPAC Policy Apply
+    if: ${{{{ github.ref == 'refs/heads/main' && inputs.confirm_apply == true }}}}
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: apf-governance
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Azure login with Governance identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{{{ vars.AZURE_GOVERNANCE_CLIENT_ID }}}}
+          tenant-id: ${{{{ vars.AZURE_TENANT_ID }}}}
+          subscription-id: ${{{{ vars.AZURE_SUBSCRIPTION_ID }}}}
+          environment: "{azure_environment}"
+          enable-AzPSSession: true
+
+      - name: Install pinned EPAC module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Install-Module `
+            -Name EnterprisePolicyAsCode `
+            -RequiredVersion $env:EPAC_VERSION `
+            -Repository PSGallery `
+            -Scope CurrentUser `
+            -Force `
+            -AllowClobber
+
+          Import-Module `
+            -Name EnterprisePolicyAsCode `
+            -RequiredVersion $env:EPAC_VERSION `
+            -Force
+
+          foreach ($command in @(
+            "Build-DeploymentPlans",
+            "Deploy-PolicyPlan",
+            "Deploy-RolesPlan"
+          )) {{
+            if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {{
+              throw "$command is not available."
+            }}
+          }}
+
+      - name: Build protected apply plan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Build-DeploymentPlans `
+            -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
+            -PacEnvironmentSelector $env:PAC_SELECTOR `
+            -OutputFolder $env:POLICY_OUTPUT
+
+      - name: Verify additive-only apply boundary
+        shell: bash
+        run: |
+          python governance/policy/tooling/verify_apply_plan.py \\
+            --mode pre-apply \\
+            --definitions-root "$POLICY_DEFINITIONS_ROOT" \\
+            --pac-selector "$PAC_SELECTOR" \\
+            --policy-plan "$POLICY_OUTPUT/plans-$PAC_SELECTOR/policy-plan.json" \\
+            --roles-plan "$POLICY_OUTPUT/plans-$PAC_SELECTOR/roles-plan.json"
+
+      - name: Upload protected apply plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: epac-policy-apply-plan-${{{{ github.run_id }}}}
+          path: governance/policy/Output/
+          if-no-files-found: warn
+
+      - name: Deploy EPAC policy plan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Deploy-PolicyPlan `
+            -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
+            -PacEnvironmentSelector $env:PAC_SELECTOR `
+            -InputFolder $env:POLICY_OUTPUT
+
+      - name: Deploy EPAC roles plan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Deploy-RolesPlan `
+            -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
+            -PacEnvironmentSelector $env:PAC_SELECTOR `
+            -InputFolder $env:POLICY_OUTPUT
+
+      - name: Rebuild EPAC plan after apply
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (Test-Path $env:POLICY_POST_APPLY_OUTPUT) {{
+            Remove-Item `
+              -Path $env:POLICY_POST_APPLY_OUTPUT `
+              -Recurse `
+              -Force
+          }}
+
+          Build-DeploymentPlans `
+            -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
+            -PacEnvironmentSelector $env:PAC_SELECTOR `
+            -OutputFolder $env:POLICY_POST_APPLY_OUTPUT
+
+      - name: Verify post-apply convergence
+        shell: bash
+        run: |
+          python governance/policy/tooling/verify_apply_plan.py \\
+            --mode post-apply \\
+            --definitions-root "$POLICY_DEFINITIONS_ROOT" \\
+            --pac-selector "$PAC_SELECTOR" \\
+            --policy-plan "$POLICY_POST_APPLY_OUTPUT/plans-$PAC_SELECTOR/policy-plan.json" \\
+            --roles-plan "$POLICY_POST_APPLY_OUTPUT/plans-$PAC_SELECTOR/roles-plan.json"
+'''
+
 def render_policy_readme(
     *,
     profile: dict[str, Any],
@@ -565,8 +742,6 @@ def render_policy_readme(
         f"Stage: `{profile['stage']}`  ",
         f"Desired-state strategy: `{profile['desired_state_strategy']}`  ",
         f"Deployment root: `{deployment_root_scope(level1)}`",
-        "",
-        "Commit 14 is still **plan-only**.",
         "",
         "## Scope-aware Wave 1",
         "",
@@ -605,15 +780,23 @@ def render_policy_readme(
             "",
             "## CI/CD",
             "",
-            "`.github/workflows/policy-plan.yml` remains PR-only and uses the APF Plan identity.",
+            "`policy-plan.yml` remains pull-request-only and uses the APF Plan identity.",
             "",
-            "There is still no Policy Apply workflow.",
+            "`policy-apply.yml` is manual-only, runs from `main`, uses the protected",
+            "`apf-governance` environment and authenticates with the Governance identity.",
+            "",
+            "Before any Azure mutation, the apply workflow rebuilds the EPAC plan and",
+            "runs an APF guard that allows only additive policy assignments already",
+            "present in the generated Definitions tree. Deletes, replaces, updates,",
+            "policy definitions, policy sets, exemptions and role changes are blocked.",
+            "",
+            "After deployment, the workflow rebuilds the plan and requires convergence",
+            "to zero remaining policy or role changes.",
             "",
         ]
     )
 
     return "\n".join(lines)
-
 
 def desired_files(
     *,
@@ -645,6 +828,10 @@ def desired_files(
         ),
         (
             project_dir
+            / "governance/policy/tooling/verify_apply_plan.py"
+        ): APPLY_GUARD_SOURCE.read_text(encoding="utf-8"),
+        (
+            project_dir
             / ".foundation/policy.yaml"
         ): render_policy_metadata(
             versions=versions,
@@ -655,7 +842,14 @@ def desired_files(
         (
             project_dir
             / ".github/workflows/policy-plan.yml"
-        ): render_workflow(
+        ): render_plan_workflow(
+            customer=customer,
+            versions=versions,
+        ),
+        (
+            project_dir
+            / ".github/workflows/policy-apply.yml"
+        ): render_apply_workflow(
             customer=customer,
             versions=versions,
         ),
@@ -776,10 +970,10 @@ def main() -> int:
         write_files(files)
 
         print()
-        print("[PASS] APF scope-aware Wave 1 desired state generated.")
+        print("[PASS] APF scope-aware Wave 1 desired state and protected apply workflow generated.")
         print(
-            "[PASS] No Azure Policy resources were changed; "
-            "the generated workflow runs Build-DeploymentPlans only."
+            "[PASS] No Azure Policy resources were changed by the generator; "
+            "Azure mutation remains isolated to the protected manual apply workflow."
         )
         return 0
 

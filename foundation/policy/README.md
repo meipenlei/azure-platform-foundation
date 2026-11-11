@@ -79,3 +79,37 @@ Commit 14 remains plan-only. There is no Policy Apply workflow.
 
 Controls from the legacy `security` archetype are intentionally deferred until
 APF defines an explicit scope model for that horizontal concern.
+
+## Commit 15 — Protected Policy Apply
+
+Commit 15 does not add policy content. It introduces the first Azure mutation
+path for the reviewed Wave 1 desired state.
+
+The generated customer workflow is:
+
+    .github/workflows/policy-apply.yml
+
+It is manual-only, restricted to `main`, uses the `apf-governance` GitHub
+environment and authenticates with the Governance UAMI through OIDC.
+
+Before deployment, EPAC rebuilds the plan from the current `main` branch. APF
+then verifies that the plan contains only additive Policy Assignments already
+represented in the generated Definitions tree. The guard rejects:
+
+- Policy Assignment updates, replacements or deletes;
+- Policy Definition changes;
+- Policy Set Definition changes;
+- Policy Exemption changes;
+- Policy Enrollment changes;
+- Role Assignment changes.
+
+Only after that check may the workflow call:
+
+    Deploy-PolicyPlan
+    Deploy-RolesPlan
+
+After deployment the workflow rebuilds the EPAC plan and requires zero
+remaining policy and role changes.
+
+This is deliberately narrower than the future steady-state apply capability.
+DINE/Modify policies and role reconciliation are not enabled by Commit 15.
