@@ -1,0 +1,67 @@
+name: Level 1 Foundation Smoke Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "foundation/modules/level1-management-groups/**"
+      - "tooling/customer-level1/**"
+      - "docs/architecture/level1-management-groups.md"
+      - ".github/workflows/level1-foundation-smoke.yml"
+
+  pull_request:
+    paths:
+      - "foundation/modules/level1-management-groups/**"
+      - "tooling/customer-level1/**"
+      - "docs/architecture/level1-management-groups.md"
+      - ".github/workflows/level1-foundation-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: level1-management-groups
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r tooling/customer-level1/requirements.txt
+
+      - name: Compile Level 1 tooling
+        run: |
+          python -m py_compile \
+            tooling/customer-level1/configure.py \
+            tooling/customer-level1/bootstrap.py \
+            tooling/customer-level1/test_configure.py
+
+      - name: Run Level 1 unit tests
+        run: |
+          python -m unittest discover \
+            -s tooling/customer-level1 \
+            -p "test_*.py"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.1"
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive foundation/modules/level1-management-groups
+
+      - name: Initialize module
+        working-directory: foundation/modules/level1-management-groups
+        run: terraform init -backend=false
+
+      - name: Validate module
+        working-directory: foundation/modules/level1-management-groups
+        run: terraform validate
