@@ -8,7 +8,9 @@ on:
       - "foundation/policy/**"
       - "foundation/modules/level0-governance/**"
       - "tooling/policy/**"
+      - "tooling/customer-policy/**"
       - "docs/architecture/governance-as-code.md"
+      - "docs/architecture/policy-plan-pilot.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -17,7 +19,9 @@ on:
       - "foundation/policy/**"
       - "foundation/modules/level0-governance/**"
       - "tooling/policy/**"
+      - "tooling/customer-policy/**"
       - "docs/architecture/governance-as-code.md"
+      - "docs/architecture/policy-plan-pilot.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -38,6 +42,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install customer policy dependencies
+        run: |
+          python -m pip install \
+            -r tooling/customer-policy/requirements.txt
+
       - name: Compile policy tooling
         run: |
           python -m py_compile \
@@ -46,12 +55,18 @@ jobs:
             tooling/policy/prepare_upstream.py \
             tooling/policy/validate.py \
             tooling/policy/test_inventory.py \
-            tooling/policy/test_migrate_legacy.py
+            tooling/policy/test_migrate_legacy.py \
+            tooling/customer-policy/configure.py \
+            tooling/customer-policy/test_configure.py
 
       - name: Run policy tooling unit tests
         run: |
           python -m unittest discover \
             -s tooling/policy \
+            -p "test_*.py"
+
+          python -m unittest discover \
+            -s tooling/customer-policy \
             -p "test_*.py"
 
       - name: Validate APF policy foundation

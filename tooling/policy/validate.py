@@ -8,10 +8,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_ROOT = REPO_ROOT / "foundation" / "policy"
-MIGRATION_MAP = (
+MIGRATION_MAP = POLICY_ROOT / "migration" / "hci-foundation01-map.json"
+PILOT_PROFILE = (
     POLICY_ROOT
-    / "migration"
-    / "hci-foundation01-map.json"
+    / "profiles"
+    / "enterprise"
+    / "audit-first-subscription-pilot.json"
 )
 
 VALID_CLASSIFICATIONS = {
@@ -65,11 +67,7 @@ def validate_versions() -> dict:
 
 
 def validate_global_settings_template() -> None:
-    path = (
-        POLICY_ROOT
-        / "templates"
-        / "global-settings.jsonc.j2"
-    )
+    path = POLICY_ROOT / "templates" / "global-settings.jsonc.j2"
     content = path.read_text(encoding="utf-8")
 
     required_tokens = (
@@ -82,12 +80,7 @@ def validate_global_settings_template() -> None:
         "[[ desired_state_strategy ]]",
     )
 
-    missing = [
-        token
-        for token in required_tokens
-        if token not in content
-    ]
-
+    missing = [token for token in required_tokens if token not in content]
     if missing:
         raise ValidationError(
             "global-settings template is missing: "
@@ -108,7 +101,6 @@ def validate_library_json() -> None:
 
 def validate_migration_map(versions: dict) -> None:
     migration = load_json(MIGRATION_MAP)
-
     upstream = migration.get("upstream", {})
     version_library = versions["azure_landing_zones_library"]
 
@@ -136,12 +128,50 @@ def validate_migration_map(versions: dict) -> None:
                 )
 
 
+def validate_pilot_profile(versions: dict) -> None:
+    profile = load_json(PILOT_PROFILE)
+
+    if profile.get("name") != "enterprise":
+        raise ValidationError("Commit 11 pilot profile must be enterprise.")
+    if profile.get("adoption_mode") != "audit_first":
+        raise ValidationError("Commit 11 pilot must be audit_first.")
+    if profile.get("stage") != "subscription_pilot":
+        raise ValidationError("Commit 11 pilot must use subscription_pilot.")
+    if profile.get("desired_state_strategy") != "ownedOnly":
+        raise ValidationError(
+            "Commit 11 pilot must use desiredState.strategy=ownedOnly."
+        )
+
+    alz_tag = versions["azure_landing_zones_library"]["alz_tag"]
+    if profile.get("upstream", {}).get("alz_tag") != alz_tag:
+        raise ValidationError(
+            "Pilot profile ALZ tag does not match versions.json."
+        )
+
+    assignments = profile.get("assignments")
+    if not isinstance(assignments, list) or len(assignments) != 1:
+        raise ValidationError(
+            "Commit 11 pilot must contain exactly one assignment."
+        )
+
+    assignment = assignments[0]
+    if assignment.get("parameters", {}).get("effect") != "Audit":
+        raise ValidationError(
+            "Commit 11 pilot assignment must remain Audit."
+        )
+    if assignment.get("enforcement_mode") != "Default":
+        raise ValidationError(
+            "Commit 11 pilot must preserve legacy enforcementMode=Default."
+        )
+
+
 def main() -> int:
     try:
         versions = validate_versions()
         validate_global_settings_template()
         validate_library_json()
         validate_migration_map(versions)
+        validate_pilot_profile(versions)
         print("[PASS] APF policy foundation validation.")
         return 0
     except (ValidationError, OSError, KeyError) as exc:
