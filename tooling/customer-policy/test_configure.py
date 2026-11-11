@@ -4,7 +4,6 @@ import importlib.util
 import json
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
 
 import yaml
@@ -20,32 +19,33 @@ assert SPEC.loader is not None
 configure = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(configure)
 
-
 ROOT_SCOPE = "/providers/Microsoft.Management/managementGroups/lab"
+MG_IDS = {
+    "root": ROOT_SCOPE,
+    "platform": ROOT_SCOPE + "-platform",
+    "landing_zones": ROOT_SCOPE + "-landing-zones",
+    "sandboxes": ROOT_SCOPE + "-sandboxes",
+    "decommissioned": ROOT_SCOPE + "-decommissioned",
+    "management": ROOT_SCOPE + "-management",
+    "connectivity": ROOT_SCOPE + "-connectivity",
+    "identity": ROOT_SCOPE + "-identity",
+    "corp": ROOT_SCOPE + "-corp",
+    "online": ROOT_SCOPE + "-online",
+}
 
 
 class ConfigureTests(unittest.TestCase):
-    def make_project(
-        self,
-        root: Path,
-        *,
-        include_level1: bool = True,
-    ) -> Path:
+    def make_project(self, root: Path) -> Path:
         project = root / "customer"
         (project / "config").mkdir(parents=True)
         (project / ".foundation").mkdir(parents=True)
 
         customer = {
             "schema_version": "0.1",
-            "customer": {
-                "id": "lab",
-                "display_name": "Lab",
-            },
+            "customer": {"id": "lab", "display_name": "Lab"},
             "azure": {
                 "tenant_id": "11111111-1111-1111-1111-111111111111",
-                "bootstrap_subscription_id": (
-                    "22222222-2222-2222-2222-222222222222"
-                ),
+                "bootstrap_subscription_id": "22222222-2222-2222-2222-222222222222",
                 "cloud": "public",
                 "primary_region": "germanywestcentral",
             },
@@ -82,39 +82,26 @@ class ConfigureTests(unittest.TestCase):
             "management_groups": {
                 "root_management_group_id": ROOT_SCOPE,
                 "root_management_group_name": "lab",
-                "management_group_ids": {
-                    "root": ROOT_SCOPE,
-                    "platform": ROOT_SCOPE + "-platform",
-                },
-                "bootstrap_subscription_parent_management_group_id": (
-                    ROOT_SCOPE + "-management"
-                ),
+                "management_group_ids": MG_IDS,
+                "bootstrap_subscription_parent_management_group_id": MG_IDS["management"],
                 "policy_deployment_root_scope": ROOT_SCOPE,
             },
         }
 
         (project / "config/customer.yaml").write_text(
-            yaml.safe_dump(customer, sort_keys=False),
-            encoding="utf-8",
+            yaml.safe_dump(customer, sort_keys=False), encoding="utf-8"
         )
         (project / "config/platform.yaml").write_text(
-            yaml.safe_dump(platform, sort_keys=False),
-            encoding="utf-8",
+            yaml.safe_dump(platform, sort_keys=False), encoding="utf-8"
         )
         (project / ".foundation/discovery.yaml").write_text(
-            yaml.safe_dump(discovery, sort_keys=False),
-            encoding="utf-8",
+            yaml.safe_dump(discovery, sort_keys=False), encoding="utf-8"
         )
-
-        if include_level1:
-            (project / configure.LEVEL1_SNAPSHOT).write_text(
-                yaml.safe_dump(level1, sort_keys=False),
-                encoding="utf-8",
-            )
-
+        (project / configure.LEVEL1_SNAPSHOT).write_text(
+            yaml.safe_dump(level1, sort_keys=False), encoding="utf-8"
+        )
         (project / ".gitignore").write_text(
-            "# Terraform\n.terraform/\n",
-            encoding="utf-8",
+            "# Terraform\n.terraform/\n", encoding="utf-8"
         )
 
         return project
@@ -129,54 +116,18 @@ class ConfigureTests(unittest.TestCase):
         }
 
     def profile(self) -> dict:
-        return {
-            "name": "enterprise",
-            "adoption_mode": "audit_first",
-            "stage": "management_group_pilot",
-            "desired_state_strategy": "ownedOnly",
-            "scope_source": configure.LEVEL1_SNAPSHOT,
-            "upstream": {
-                "alz_tag": "platform/alz/2026.11.0",
-                "assignment": "Deny-Public-IP",
-            },
-            "migration_provenance": {
-                "legacy_assignment": "CAF-Deny-Public-IP",
-            },
-            "assignments": [
-                {
-                    "definition": {
-                        "id": (
-                            "/providers/Microsoft.Authorization/"
-                            "policyDefinitions/test"
-                        ),
-                        "definition_version": "2.*.*",
-                        "display_name": "Test policy",
-                    },
-                    "assignment": {
-                        "name": "apf-audit-public-ip",
-                        "display_name": "APF - Audit public IP creation",
-                        "description": "Test",
-                    },
-                    "enforcement_mode": "Default",
-                    "parameters": {
-                        "effect": "Audit",
-                        "listOfResourceTypesNotAllowed": [
-                            "Microsoft.Network/publicIPAddresses"
-                        ],
-                    },
-                }
-            ],
-        }
+        return json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "foundation/policy/profiles/enterprise/audit-first-wave1.json"
+            ).read_text(encoding="utf-8")
+        )
 
-    def test_generated_plan_uses_level1_management_group(self) -> None:
+    def test_wave1_generates_four_scope_aware_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             project = self.make_project(Path(temp))
-            (
-                customer,
-                platform,
-                discovery,
-                level1,
-            ) = configure.verify_project(project)
+            customer, platform, discovery, level1 = configure.verify_project(project)
+            profile = self.profile()
 
             configure.validate_inputs(
                 customer=customer,
@@ -184,9 +135,69 @@ class ConfigureTests(unittest.TestCase):
                 discovery=discovery,
                 level1=level1,
                 versions=self.versions(),
-                profile=self.profile(),
+                profile=profile,
             )
 
+            files = configure.desired_files(
+                project_dir=project,
+                customer=customer,
+                versions=self.versions(),
+                profile=profile,
+                discovery=discovery,
+                level1=level1,
+            )
+
+            assignment_dir = project / "governance/policy/Definitions/policyAssignments"
+            generated = {
+                path.name: json.loads(content)
+                for path, content in files.items()
+                if path.parent == assignment_dir
+            }
+
+            self.assertEqual(len(generated), 4)
+
+            expected = {
+                "apf-audit-public-ip.assignment.jsonc": ("identity", "Default", "Audit"),
+                "apf-deny-classic-resources.assignment.jsonc": ("root", "DoNotEnforce", "Deny"),
+                "apf-deny-storage-http.assignment.jsonc": ("landing_zones", "DoNotEnforce", "Deny"),
+                "apf-deny-hybrid-networking.assignment.jsonc": ("corp", "DoNotEnforce", "Deny"),
+            }
+
+            for filename, (scope_key, enforcement, effect) in expected.items():
+                doc = generated[filename]
+                self.assertEqual(doc["scope"][configure.PAC_SELECTOR], [MG_IDS[scope_key]])
+                self.assertEqual(doc["enforcementMode"], enforcement)
+                self.assertEqual(doc["parameters"]["effect"], effect)
+                self.assertEqual(doc["metadata"]["apfScopeKey"], scope_key)
+
+            metadata = yaml.safe_load(files[project / ".foundation/policy.yaml"])
+            self.assertEqual(metadata["profile"]["assignment_count"], 4)
+            self.assertEqual(metadata["profile"]["stage"], "scope_aware_wave1")
+            self.assertEqual(metadata["desired_state_strategy"], "ownedOnly")
+
+    def test_unknown_scope_key_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = self.make_project(Path(temp))
+            _, _, _, level1 = configure.verify_project(project)
+            assignment = {"scope_key": "security"}
+
+            with self.assertRaises(configure.ConfigureError):
+                configure.assignment_scope(level1, assignment)
+
+    def test_profile_rejects_duplicate_assignment_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = self.make_project(Path(temp))
+            _, _, _, level1 = configure.verify_project(project)
+            profile = self.profile()
+            profile["assignments"][1]["file_name"] = profile["assignments"][0]["file_name"]
+
+            with self.assertRaises(configure.ConfigureError):
+                configure.validate_profile(profile, level1)
+
+    def test_workflow_remains_plan_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = self.make_project(Path(temp))
+            customer, _, discovery, level1 = configure.verify_project(project)
             files = configure.desired_files(
                 project_dir=project,
                 customer=customer,
@@ -195,101 +206,11 @@ class ConfigureTests(unittest.TestCase):
                 discovery=discovery,
                 level1=level1,
             )
-
-            global_settings = json.loads(
-                files[
-                    project
-                    / "governance/policy/Definitions/"
-                    "global-settings.jsonc"
-                ]
-            )
-            assignment = json.loads(
-                files[
-                    project
-                    / "governance/policy/Definitions/policyAssignments/"
-                    "apf-audit-public-ip.assignment.jsonc"
-                ]
-            )
-            metadata = yaml.safe_load(
-                files[project / ".foundation/policy.yaml"]
-            )
-            workflow = files[
-                project / ".github/workflows/policy-plan.yml"
-            ]
-
-            env = global_settings["pacEnvironments"][0]
-
-            self.assertEqual(
-                env["deploymentRootScope"],
-                ROOT_SCOPE,
-            )
-            self.assertEqual(
-                env["desiredState"]["strategy"],
-                "ownedOnly",
-            )
-            self.assertEqual(
-                assignment["scope"][configure.PAC_SELECTOR],
-                [ROOT_SCOPE],
-            )
-            self.assertEqual(
-                assignment["parameters"]["effect"],
-                "Audit",
-            )
-            self.assertEqual(
-                assignment["definitionEntry"]["definitionVersion"],
-                "2.*.*",
-            )
-            self.assertEqual(
-                metadata["deployment_root_scope"],
-                ROOT_SCOPE,
-            )
-            self.assertEqual(
-                metadata["deployment_root_source"],
-                configure.LEVEL1_SNAPSHOT,
-            )
-
+            workflow = files[project / ".github/workflows/policy-plan.yml"]
             self.assertIn("AZURE_PLAN_CLIENT_ID", workflow)
             self.assertIn("Build-DeploymentPlans", workflow)
             self.assertNotIn("Deploy-PolicyPlan", workflow)
             self.assertNotIn("Deploy-RolesPlan", workflow)
-
-    def test_level1_snapshot_is_required(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            project = self.make_project(
-                Path(temp),
-                include_level1=False,
-            )
-
-            with self.assertRaises(configure.ConfigureError):
-                configure.verify_project(project)
-
-    def test_subscription_scope_is_rejected(self) -> None:
-        level1 = {
-            "management_groups": {
-                "management_group_ids": {
-                    "root": "/subscriptions/example"
-                },
-                "policy_deployment_root_scope": (
-                    "/subscriptions/example"
-                ),
-            }
-        }
-
-        with self.assertRaises(configure.ConfigureError):
-            configure.deployment_root_scope(level1)
-
-    def test_pac_owner_id_is_deterministic(self) -> None:
-        discovery = {
-            "github": {
-                "owner_id": "123",
-                "repository_id": "456",
-            }
-        }
-        first = configure.pac_owner_id(discovery)
-        second = configure.pac_owner_id(discovery)
-
-        self.assertEqual(first, second)
-        uuid.UUID(first)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from __future__ import annotations
 
 import argparse
@@ -10,6 +11,7 @@ from typing import Any
 
 import yaml
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERSIONS_PATH = REPO_ROOT / "foundation" / "policy" / "versions.json"
 PROFILE_PATH = (
@@ -18,12 +20,14 @@ PROFILE_PATH = (
     / "policy"
     / "profiles"
     / "enterprise"
-    / "audit-first-management-group-pilot.json"
+    / "audit-first-wave1.json"
 )
 
 PAC_SELECTOR = "apf-governance"
 LEVEL1_SNAPSHOT = ".foundation/level1-management-groups.yaml"
-MANAGEMENT_GROUP_SCOPE_PREFIX = "/providers/Microsoft.Management/managementGroups/"
+MANAGEMENT_GROUP_SCOPE_PREFIX = (
+    "/providers/Microsoft.Management/managementGroups/"
+)
 
 CLOUD_MAP = {
     "public": "AzureCloud",
@@ -96,6 +100,7 @@ def verify_project(
         for path in required.values()
         if not path.is_file()
     ]
+
     if missing:
         raise ConfigureError(
             "The project is missing required APF files:\n  - "
@@ -110,16 +115,45 @@ def verify_project(
     )
 
 
-def deployment_root_scope(level1: dict[str, Any]) -> str:
+def management_group_ids(level1: dict[str, Any]) -> dict[str, str]:
     try:
-        management_groups = level1["management_groups"]
-        scope = str(management_groups["policy_deployment_root_scope"])
-        root_scope = str(management_groups["management_group_ids"]["root"])
+        raw = level1["management_groups"]["management_group_ids"]
     except (KeyError, TypeError) as exc:
         raise ConfigureError(
-            f"{LEVEL1_SNAPSHOT} does not contain the required "
-            "Level 1 management-group outputs."
+            f"{LEVEL1_SNAPSHOT} does not contain management_group_ids."
         ) from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigureError(
+            f"{LEVEL1_SNAPSHOT} management_group_ids must be an object."
+        )
+
+    result: dict[str, str] = {}
+
+    for key, value in raw.items():
+        scope = str(value)
+        if not scope.startswith(MANAGEMENT_GROUP_SCOPE_PREFIX):
+            raise ConfigureError(
+                f"Management-group scope '{key}' is invalid: {scope}"
+            )
+        result[str(key)] = scope
+
+    return result
+
+
+def deployment_root_scope(level1: dict[str, Any]) -> str:
+    try:
+        scope = str(
+            level1["management_groups"]["policy_deployment_root_scope"]
+        )
+    except (KeyError, TypeError) as exc:
+        raise ConfigureError(
+            f"{LEVEL1_SNAPSHOT} does not contain "
+            "policy_deployment_root_scope."
+        ) from exc
+
+    groups = management_group_ids(level1)
+    root_scope = groups.get("root")
 
     if not scope.startswith(MANAGEMENT_GROUP_SCOPE_PREFIX):
         raise ConfigureError(
@@ -134,6 +168,94 @@ def deployment_root_scope(level1: dict[str, Any]) -> str:
         )
 
     return scope
+
+
+def assignment_scope(
+    level1: dict[str, Any],
+    assignment: dict[str, Any],
+) -> str:
+    scope_key = str(assignment.get("scope_key", ""))
+    groups = management_group_ids(level1)
+
+    if not scope_key:
+        raise ConfigureError("Policy assignment scope_key is required.")
+
+    if scope_key not in groups:
+        raise ConfigureError(
+            f"Policy assignment references unknown Level 1 scope_key "
+            f"'{scope_key}'."
+        )
+
+    return groups[scope_key]
+
+
+def validate_profile(
+    profile: dict[str, Any],
+    level1: dict[str, Any],
+) -> None:
+    assignments = profile.get("assignments")
+
+    if not isinstance(assignments, list) or len(assignments) < 2:
+        raise ConfigureError(
+            "Scope-aware Wave 1 must contain multiple assignments."
+        )
+
+    seen_keys: set[str] = set()
+    seen_files: set[str] = set()
+    seen_names: set[str] = set()
+
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            raise ConfigureError(
+                "Every profile assignment must be an object."
+            )
+
+        key = str(assignment.get("key", ""))
+        file_name = str(assignment.get("file_name", ""))
+        assignment_name = str(
+            (assignment.get("assignment") or {}).get("name", "")
+        )
+
+        if not key or key in seen_keys:
+            raise ConfigureError(
+                f"Policy assignment key must be unique: {key!r}"
+            )
+        if (
+            not file_name
+            or not file_name.endswith(".assignment.jsonc")
+            or file_name in seen_files
+        ):
+            raise ConfigureError(
+                f"Policy assignment file_name is invalid or duplicate: "
+                f"{file_name!r}"
+            )
+        if not assignment_name or assignment_name in seen_names:
+            raise ConfigureError(
+                f"Azure policy assignment name is invalid or duplicate: "
+                f"{assignment_name!r}"
+            )
+
+        assignment_scope(level1, assignment)
+
+        enforcement = assignment.get("enforcement_mode")
+        if enforcement not in ("Default", "DoNotEnforce"):
+            raise ConfigureError(
+                f"Unsupported enforcement_mode for {key}: {enforcement!r}"
+            )
+
+        definition = assignment.get("definition") or {}
+        if not definition.get("id"):
+            raise ConfigureError(
+                f"Policy definition ID is required for {key}."
+            )
+        if not definition.get("definition_version"):
+            raise ConfigureError(
+                f"Policy definition version is required for {key}."
+            )
+
+        seen_keys.add(key)
+        seen_files.add(file_name)
+        seen_names.add(assignment_name)
 
 
 def validate_inputs(
@@ -178,20 +300,23 @@ def validate_inputs(
 
         if profile["desired_state_strategy"] != "ownedOnly":
             raise ConfigureError(
-                "Management-group pilot must use "
+                "Scope-aware Wave 1 must use "
                 "desiredState.strategy=ownedOnly."
             )
 
-        if profile["stage"] != "management_group_pilot":
+        if profile["stage"] != "scope_aware_wave1":
             raise ConfigureError(
-                "Active policy profile must use management_group_pilot."
+                "Active policy profile must use scope_aware_wave1."
             )
 
         if profile.get("scope_source") != LEVEL1_SNAPSHOT:
             raise ConfigureError(
-                "Management-group pilot must derive its scope from "
+                "Scope-aware Wave 1 must derive scopes from "
                 "the Level 1 snapshot."
             )
+
+        validate_profile(profile, level1)
+
     except KeyError as exc:
         raise ConfigureError(
             f"Required APF configuration field is missing: {exc}"
@@ -215,8 +340,6 @@ def render_global_settings(
     owner_id: str,
     strategy: str,
 ) -> str:
-    scope = deployment_root_scope(level1)
-
     document = {
         "$schema": (
             "https://raw.githubusercontent.com/"
@@ -230,7 +353,7 @@ def render_global_settings(
                 "pacSelector": PAC_SELECTOR,
                 "cloud": CLOUD_MAP[customer["azure"]["cloud"]],
                 "tenantId": customer["azure"]["tenant_id"],
-                "deploymentRootScope": scope,
+                "deploymentRootScope": deployment_root_scope(level1),
                 "managedIdentityLocation": customer["azure"]["primary_region"],
                 "skipResourceValidationForExemptions": False,
                 "desiredState": {
@@ -250,11 +373,10 @@ def render_assignment(
     *,
     level1: dict[str, Any],
     profile: dict[str, Any],
+    assignment: dict[str, Any],
 ) -> str:
-    assignment = profile["assignments"][0]
     definition = assignment["definition"]
     assignment_meta = assignment["assignment"]
-    scope = deployment_root_scope(level1)
 
     document = {
         "$schema": (
@@ -262,7 +384,10 @@ def render_assignment(
             "Azure/enterprise-azure-policy-as-code/main/"
             "Schemas/policy-assignment-schema.json"
         ),
-        "nodeName": "/APF/Enterprise/AuditFirst/PublicIP/",
+        "nodeName": (
+            f"/APF/Enterprise/AuditFirst/Wave1/"
+            f"{assignment['key']}/"
+        ),
         "definitionEntry": {
             "policyId": definition["id"],
             "definitionVersion": definition["definition_version"],
@@ -278,16 +403,18 @@ def render_assignment(
             "apfAdoptionMode": profile["adoption_mode"],
             "apfStage": profile["stage"],
             "apfScopeSource": profile["scope_source"],
-            "apfUpstreamAssignment": profile["upstream"]["assignment"],
+            "apfScopeKey": assignment["scope_key"],
+            "apfUpstreamAssignment": assignment["upstream_assignment"],
             "apfUpstreamAlzTag": profile["upstream"]["alz_tag"],
-            "apfLegacyAssignment": (
-                profile["migration_provenance"]["legacy_assignment"]
-            ),
+            "apfLegacyAssignment": assignment["legacy_assignment"],
+            "apfLegacyArchetype": assignment["legacy_archetype"],
         },
         "enforcementMode": assignment["enforcement_mode"],
-        "parameters": assignment["parameters"],
+        "parameters": assignment.get("parameters", {}),
         "scope": {
-            PAC_SELECTOR: [scope]
+            PAC_SELECTOR: [
+                assignment_scope(level1, assignment)
+            ]
         },
     }
 
@@ -301,6 +428,14 @@ def render_policy_metadata(
     owner_id: str,
     level1: dict[str, Any],
 ) -> str:
+    scopes = {
+        assignment["key"]: {
+            "scope_key": assignment["scope_key"],
+            "scope": assignment_scope(level1, assignment),
+        }
+        for assignment in profile["assignments"]
+    }
+
     data = {
         "schema_version": "0.1",
         "generator": "apf-customer-policy",
@@ -314,7 +449,9 @@ def render_policy_metadata(
             "name": profile["name"],
             "adoption_mode": profile["adoption_mode"],
             "stage": profile["stage"],
+            "assignment_count": len(profile["assignments"]),
         },
+        "assignment_scopes": scopes,
         "toolchain": {
             "epac": versions["epac"]["version"],
             "alz": versions["azure_landing_zones_library"]["alz_tag"],
@@ -416,54 +553,66 @@ def render_policy_readme(
     profile: dict[str, Any],
     level1: dict[str, Any],
 ) -> str:
-    scope = deployment_root_scope(level1)
+    lines = [
+        "# APF Policy Desired State",
+        "",
+        "This directory is generated by Azure Platform Foundation.",
+        "",
+        "## Current stage",
+        "",
+        f"Profile: `{profile['name']}`  ",
+        f"Adoption mode: `{profile['adoption_mode']}`  ",
+        f"Stage: `{profile['stage']}`  ",
+        f"Desired-state strategy: `{profile['desired_state_strategy']}`  ",
+        f"Deployment root: `{deployment_root_scope(level1)}`",
+        "",
+        "Commit 14 is still **plan-only**.",
+        "",
+        "## Scope-aware Wave 1",
+        "",
+        "| Assignment | Legacy archetype | APF scope | Behavior |",
+        "| --- | --- | --- | --- |",
+    ]
 
-    return f'''# APF Policy Desired State
+    for assignment in profile["assignments"]:
+        behavior = (
+            f"{assignment['enforcement_mode']}; "
+            f"effect={assignment.get('parameters', {}).get('effect', 'n/a')}"
+        )
+        lines.append(
+            f"| `{assignment['upstream_assignment']}` "
+            f"| `{assignment['legacy_archetype']}` "
+            f"| `{assignment['scope_key']}` "
+            f"| `{behavior}` |"
+        )
 
-This directory is generated by Azure Platform Foundation.
+    lines.extend(
+        [
+            "",
+            "Scopes are resolved from:",
+            "",
+            f"    {LEVEL1_SNAPSHOT}",
+            "",
+            "The generator does not infer missing archetype mappings.",
+            "",
+            "## Ownership",
+            "",
+            "The EPAC environment continues to use:",
+            "",
+            "    desiredState.strategy = ownedOnly",
+            "",
+            "Existing policies not owned by this EPAC instance are not deletion candidates.",
+            "",
+            "## CI/CD",
+            "",
+            "`.github/workflows/policy-plan.yml` remains PR-only and uses the APF Plan identity.",
+            "",
+            "There is still no Policy Apply workflow.",
+            "",
+        ]
+    )
 
-## Current stage
-
-Profile: `{profile["name"]}`  
-Adoption mode: `{profile["adoption_mode"]}`  
-Stage: `{profile["stage"]}`  
-Desired-state strategy: `{profile["desired_state_strategy"]}`  
-Deployment root: `{scope}`
-
-The deployment root is derived from:
-
-    {LEVEL1_SNAPSHOT}
-
-## Pilot assignment
-
-The desired-state slice still contains one audit-only policy assignment:
-
-    APF - Audit public IP creation
-
-It preserves the legacy `CAF-Deny-Public-IP` behavior:
-
-    effect = Audit
-    enforcementMode = Default
-    definitionVersion = 2.*.*
-
-The assignment is now scoped to the APF root management group and therefore
-covers its child management groups and subscriptions.
-
-## Ownership
-
-The EPAC environment continues to use:
-
-    desiredState.strategy = ownedOnly
-
-Existing policies not owned by this EPAC instance are not deletion candidates.
-
-## CI/CD
-
-`.github/workflows/policy-plan.yml` remains PR-only and uses the APF Plan
-identity.
-
-There is still no Policy Apply workflow.
-'''
+    return "\n".join(lines)
 
 
 def desired_files(
@@ -477,7 +626,7 @@ def desired_files(
 ) -> dict[Path, str]:
     owner_id = pac_owner_id(discovery)
 
-    return {
+    files = {
         (
             project_dir
             / "governance/policy/Definitions/global-settings.jsonc"
@@ -486,14 +635,6 @@ def desired_files(
             level1=level1,
             owner_id=owner_id,
             strategy=profile["desired_state_strategy"],
-        ),
-        (
-            project_dir
-            / "governance/policy/Definitions/policyAssignments/"
-            "apf-audit-public-ip.assignment.jsonc"
-        ): render_assignment(
-            level1=level1,
-            profile=profile,
         ),
         (
             project_dir
@@ -520,6 +661,22 @@ def desired_files(
         ),
     }
 
+    assignment_dir = (
+        project_dir
+        / "governance/policy/Definitions/policyAssignments"
+    )
+
+    for assignment in profile["assignments"]:
+        files[
+            assignment_dir / assignment["file_name"]
+        ] = render_assignment(
+            level1=level1,
+            profile=profile,
+            assignment=assignment,
+        )
+
+    return files
+
 
 def ensure_gitignore(project_dir: Path) -> tuple[Path, str]:
     path = project_dir / ".gitignore"
@@ -539,12 +696,7 @@ def ensure_gitignore(project_dir: Path) -> tuple[Path, str]:
 
     return (
         path,
-        existing
-        + suffix
-        + marker
-        + "\n"
-        + entry
-        + "\n",
+        existing + suffix + marker + "\n" + entry + "\n",
     )
 
 
@@ -557,6 +709,7 @@ def changed_files(files: dict[Path, str]) -> list[Path]:
             if path.is_file()
             else None
         )
+
         if current != content:
             changed.append(path)
 
@@ -580,13 +733,7 @@ def main() -> int:
     print()
 
     try:
-        (
-            customer,
-            platform,
-            discovery,
-            level1,
-        ) = verify_project(project_dir)
-
+        customer, platform, discovery, level1 = verify_project(project_dir)
         versions = load_json(VERSIONS_PATH)
         profile = load_json(PROFILE_PATH)
 
@@ -629,7 +776,7 @@ def main() -> int:
         write_files(files)
 
         print()
-        print("[PASS] APF management-group policy desired state generated.")
+        print("[PASS] APF scope-aware Wave 1 desired state generated.")
         print(
             "[PASS] No Azure Policy resources were changed; "
             "the generated workflow runs Build-DeploymentPlans only."

@@ -1,0 +1,176 @@
+{
+  "schema_version": "0.1",
+  "name": "enterprise",
+  "adoption_mode": "audit_first",
+  "stage": "scope_aware_wave1",
+  "description": "First scope-aware APF policy baseline wave. Reuses pinned ALZ assignments while preserving legacy audit/DoNotEnforce behavior and legacy archetype scope semantics.",
+  "desired_state_strategy": "ownedOnly",
+  "scope_source": ".foundation/level1-management-groups.yaml",
+  "upstream": {
+    "library": "Azure/Azure-Landing-Zones-Library",
+    "alz_tag": "platform/alz/2026.11.0"
+  },
+  "assignments": [
+    {
+      "key": "audit_public_ip",
+      "file_name": "apf-audit-public-ip.assignment.jsonc",
+      "scope_key": "identity",
+      "upstream_assignment": "Deny-Public-IP",
+      "legacy_assignment": "CAF-Deny-Public-IP",
+      "legacy_archetype": "es_identity",
+      "definition": {
+        "id": "/providers/Microsoft.Authorization/policyDefinitions/6c112d4e-5bc7-47ae-a041-ea2d9dccd749",
+        "display_name": "Not allowed resource types",
+        "definition_version": "2.*.*"
+      },
+      "assignment": {
+        "name": "apf-audit-public-ip",
+        "display_name": "APF - Audit public IP creation",
+        "description": "Preserves legacy CAF-Deny-Public-IP behavior at the Identity management group."
+      },
+      "enforcement_mode": "Default",
+      "parameters": {
+        "listOfResourceTypesNotAllowed": [
+          "Microsoft.Network/publicIPAddresses"
+        ],
+        "effect": "Audit"
+      }
+    },
+    {
+      "key": "deny_classic_resources",
+      "file_name": "apf-deny-classic-resources.assignment.jsonc",
+      "scope_key": "root",
+      "upstream_assignment": "Deny-Classic-Resources",
+      "legacy_assignment": "Deny-Classic-Resources",
+      "legacy_archetype": "es_root",
+      "definition": {
+        "id": "/providers/Microsoft.Authorization/policyDefinitions/6c112d4e-5bc7-47ae-a041-ea2d9dccd749",
+        "display_name": "Not allowed resource types",
+        "definition_version": "2.*.*"
+      },
+      "assignment": {
+        "name": "apf-deny-classic-resources",
+        "display_name": "APF - Deny classic resources",
+        "description": "Preserves the legacy non-enforcing classic-resource guardrail at the APF root."
+      },
+      "enforcement_mode": "DoNotEnforce",
+      "parameters": {
+        "listOfResourceTypesNotAllowed": [
+          "Microsoft.ClassicCompute/capabilities",
+          "Microsoft.ClassicCompute/checkDomainNameAvailability",
+          "Microsoft.ClassicCompute/domainNames",
+          "Microsoft.ClassicCompute/domainNames/capabilities",
+          "Microsoft.ClassicCompute/domainNames/internalLoadBalancers",
+          "Microsoft.ClassicCompute/domainNames/serviceCertificates",
+          "Microsoft.ClassicCompute/domainNames/slots",
+          "Microsoft.ClassicCompute/domainNames/slots/roles",
+          "Microsoft.ClassicCompute/domainNames/slots/roles/metricDefinitions",
+          "Microsoft.ClassicCompute/domainNames/slots/roles/metrics",
+          "Microsoft.ClassicCompute/moveSubscriptionResources",
+          "Microsoft.ClassicCompute/operatingSystemFamilies",
+          "Microsoft.ClassicCompute/operatingSystems",
+          "Microsoft.ClassicCompute/operations",
+          "Microsoft.ClassicCompute/operationStatuses",
+          "Microsoft.ClassicCompute/quotas",
+          "Microsoft.ClassicCompute/resourceTypes",
+          "Microsoft.ClassicCompute/validateSubscriptionMoveAvailability",
+          "Microsoft.ClassicCompute/virtualMachines",
+          "Microsoft.ClassicCompute/virtualMachines/diagnosticSettings",
+          "Microsoft.ClassicCompute/virtualMachines/metricDefinitions",
+          "Microsoft.ClassicCompute/virtualMachines/metrics",
+          "Microsoft.ClassicInfrastructureMigrate/classicInfrastructureResources",
+          "Microsoft.ClassicNetwork/capabilities",
+          "Microsoft.ClassicNetwork/expressRouteCrossConnections",
+          "Microsoft.ClassicNetwork/expressRouteCrossConnections/peerings",
+          "Microsoft.ClassicNetwork/gatewaySupportedDevices",
+          "Microsoft.ClassicNetwork/networkSecurityGroups",
+          "Microsoft.ClassicNetwork/operations",
+          "Microsoft.ClassicNetwork/quotas",
+          "Microsoft.ClassicNetwork/reservedIps",
+          "Microsoft.ClassicNetwork/virtualNetworks",
+          "Microsoft.ClassicNetwork/virtualNetworks/remoteVirtualNetworkPeeringProxies",
+          "Microsoft.ClassicNetwork/virtualNetworks/virtualNetworkPeerings",
+          "Microsoft.ClassicStorage/capabilities",
+          "Microsoft.ClassicStorage/checkStorageAccountAvailability",
+          "Microsoft.ClassicStorage/disks",
+          "Microsoft.ClassicStorage/images",
+          "Microsoft.ClassicStorage/operations",
+          "Microsoft.ClassicStorage/osImages",
+          "Microsoft.ClassicStorage/osPlatformImages",
+          "Microsoft.ClassicStorage/publicImages",
+          "Microsoft.ClassicStorage/quotas",
+          "Microsoft.ClassicStorage/storageAccounts",
+          "Microsoft.ClassicStorage/storageAccounts/blobServices",
+          "Microsoft.ClassicStorage/storageAccounts/fileServices",
+          "Microsoft.ClassicStorage/storageAccounts/metricDefinitions",
+          "Microsoft.ClassicStorage/storageAccounts/metrics",
+          "Microsoft.ClassicStorage/storageAccounts/queueServices",
+          "Microsoft.ClassicStorage/storageAccounts/services",
+          "Microsoft.ClassicStorage/storageAccounts/services/diagnosticSettings",
+          "Microsoft.ClassicStorage/storageAccounts/services/metricDefinitions",
+          "Microsoft.ClassicStorage/storageAccounts/services/metrics",
+          "Microsoft.ClassicStorage/storageAccounts/tableServices",
+          "Microsoft.ClassicStorage/storageAccounts/vmImages",
+          "Microsoft.ClassicStorage/vmImages",
+          "Microsoft.ClassicSubscription/operations"
+        ],
+        "effect": "Deny"
+      }
+    },
+    {
+      "key": "deny_storage_http",
+      "file_name": "apf-deny-storage-http.assignment.jsonc",
+      "scope_key": "landing_zones",
+      "upstream_assignment": "Deny-Storage-http",
+      "legacy_assignment": "Deny-Storage-http",
+      "legacy_archetype": "es_landing_zones",
+      "definition": {
+        "id": "/providers/Microsoft.Authorization/policyDefinitions/404c3081-a854-4457-ae30-26a93ef643f9",
+        "display_name": "Secure transfer to storage accounts should be enabled",
+        "definition_version": "2.*.*"
+      },
+      "assignment": {
+        "name": "apf-deny-storage-http",
+        "display_name": "APF - Secure transfer to storage",
+        "description": "Preserves the legacy non-enforcing secure-transfer guardrail at Landing Zones."
+      },
+      "enforcement_mode": "DoNotEnforce",
+      "parameters": {
+        "effect": "Deny"
+      }
+    },
+    {
+      "key": "deny_hybrid_networking",
+      "file_name": "apf-deny-hybrid-networking.assignment.jsonc",
+      "scope_key": "corp",
+      "upstream_assignment": "Deny-HybridNetworking",
+      "legacy_assignment": "Deny-HybridNetworking",
+      "legacy_archetype": "es_corp",
+      "definition": {
+        "id": "/providers/Microsoft.Authorization/policyDefinitions/6c112d4e-5bc7-47ae-a041-ea2d9dccd749",
+        "display_name": "Not allowed resource types",
+        "definition_version": "2.*.*"
+      },
+      "assignment": {
+        "name": "apf-deny-hybrid-networking",
+        "display_name": "APF - Deny hybrid networking in Corp",
+        "description": "Preserves the legacy non-enforcing Corp guardrail for vWAN, ExpressRoute and VPN gateway resource types."
+      },
+      "enforcement_mode": "DoNotEnforce",
+      "parameters": {
+        "listOfResourceTypesNotAllowed": [
+          "microsoft.network/expressroutecircuits",
+          "microsoft.network/expressroutegateways",
+          "microsoft.network/expressrouteports",
+          "microsoft.network/virtualwans",
+          "microsoft.network/virtualhubs",
+          "microsoft.network/vpngateways",
+          "microsoft.network/p2svpngateways",
+          "microsoft.network/vpnsites",
+          "microsoft.network/virtualnetworkgateways"
+        ],
+        "effect": "Deny"
+      }
+    }
+  ]
+}

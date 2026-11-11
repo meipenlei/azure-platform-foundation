@@ -9,11 +9,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_ROOT = REPO_ROOT / "foundation" / "policy"
 MIGRATION_MAP = POLICY_ROOT / "migration" / "hci-foundation01-map.json"
-PILOT_PROFILE = (
+WAVE1_PROFILE = (
     POLICY_ROOT
     / "profiles"
     / "enterprise"
-    / "audit-first-management-group-pilot.json"
+    / "audit-first-wave1.json"
 )
 
 VALID_CLASSIFICATIONS = {
@@ -21,6 +21,13 @@ VALID_CLASSIFICATIONS = {
     "APF_CUSTOM",
     "REVIEW",
     "OBSOLETE",
+}
+
+EXPECTED_WAVE1 = {
+    "CAF-Deny-Public-IP": ("identity", "Default", "Audit"),
+    "Deny-Classic-Resources": ("root", "DoNotEnforce", "Deny"),
+    "Deny-Storage-http": ("landing_zones", "DoNotEnforce", "Deny"),
+    "Deny-HybridNetworking": ("corp", "DoNotEnforce", "Deny"),
 }
 
 
@@ -82,11 +89,7 @@ def validate_global_settings_template() -> None:
         "[[ desired_state_strategy ]]",
     )
 
-    missing = [
-        token
-        for token in required_tokens
-        if token not in content
-    ]
+    missing = [token for token in required_tokens if token not in content]
     if missing:
         raise ValidationError(
             "global-settings template is missing: "
@@ -134,65 +137,73 @@ def validate_migration_map(versions: dict) -> None:
                 )
 
 
-def validate_pilot_profile(versions: dict) -> None:
-    profile = load_json(PILOT_PROFILE)
+def validate_wave1_profile(versions: dict) -> None:
+    profile = load_json(WAVE1_PROFILE)
 
     if profile.get("name") != "enterprise":
-        raise ValidationError(
-            "Management-group pilot profile must be enterprise."
-        )
+        raise ValidationError("Wave 1 profile must be enterprise.")
     if profile.get("adoption_mode") != "audit_first":
-        raise ValidationError(
-            "Management-group pilot must be audit_first."
-        )
-    if profile.get("stage") != "management_group_pilot":
-        raise ValidationError(
-            "Active pilot must use management_group_pilot."
-        )
+        raise ValidationError("Wave 1 must be audit_first.")
+    if profile.get("stage") != "scope_aware_wave1":
+        raise ValidationError("Active profile must use scope_aware_wave1.")
     if profile.get("desired_state_strategy") != "ownedOnly":
         raise ValidationError(
-            "Management-group pilot must use "
-            "desiredState.strategy=ownedOnly."
+            "Wave 1 must use desiredState.strategy=ownedOnly."
         )
     if (
         profile.get("scope_source")
         != ".foundation/level1-management-groups.yaml"
     ):
         raise ValidationError(
-            "Management-group pilot must derive scope from "
-            "the Level 1 snapshot."
+            "Wave 1 must derive scopes from the Level 1 snapshot."
         )
 
     alz_tag = versions["azure_landing_zones_library"]["alz_tag"]
     if profile.get("upstream", {}).get("alz_tag") != alz_tag:
         raise ValidationError(
-            "Pilot profile ALZ tag does not match versions.json."
+            "Wave 1 ALZ tag does not match versions.json."
         )
 
     assignments = profile.get("assignments")
-    if not isinstance(assignments, list) or len(assignments) != 1:
+    if not isinstance(assignments, list) or len(assignments) != 4:
         raise ValidationError(
-            "Management-group pilot must contain exactly one assignment."
+            "Commit 14 Wave 1 must contain exactly four assignments."
         )
 
-    assignment = assignments[0]
+    actual: dict[str, tuple[str, str, str]] = {}
+    seen_files: set[str] = set()
 
-    if assignment.get("parameters", {}).get("effect") != "Audit":
-        raise ValidationError(
-            "Management-group pilot assignment must remain Audit."
+    for assignment in assignments:
+        legacy = str(assignment.get("legacy_assignment", ""))
+        scope_key = str(assignment.get("scope_key", ""))
+        enforcement = str(assignment.get("enforcement_mode", ""))
+        effect = str((assignment.get("parameters") or {}).get("effect", ""))
+        file_name = str(assignment.get("file_name", ""))
+
+        if not file_name.endswith(".assignment.jsonc"):
+            raise ValidationError(
+                f"Invalid Wave 1 assignment file name: {file_name!r}."
+            )
+        if file_name in seen_files:
+            raise ValidationError(
+                f"Duplicate Wave 1 assignment file: {file_name}."
+            )
+        seen_files.add(file_name)
+
+        definition_version = (
+            assignment.get("definition", {}).get("definition_version")
         )
-    if assignment.get("enforcement_mode") != "Default":
+        if not definition_version:
+            raise ValidationError(
+                f"Definition version missing for {legacy}."
+            )
+
+        actual[legacy] = (scope_key, enforcement, effect)
+
+    if actual != EXPECTED_WAVE1:
         raise ValidationError(
-            "Management-group pilot must preserve "
-            "legacy enforcementMode=Default."
-        )
-    if (
-        assignment.get("definition", {}).get("definition_version")
-        != "2.*.*"
-    ):
-        raise ValidationError(
-            "Management-group pilot must pin the built-in policy "
-            "to major version 2."
+            "Wave 1 scope/enforcement/effect mapping does not match the "
+            "curated legacy baseline."
         )
 
 
@@ -202,7 +213,7 @@ def main() -> int:
         validate_global_settings_template()
         validate_library_json()
         validate_migration_map(versions)
-        validate_pilot_profile(versions)
+        validate_wave1_profile(versions)
         print("[PASS] APF policy foundation validation.")
         return 0
     except (ValidationError, OSError, KeyError) as exc:
