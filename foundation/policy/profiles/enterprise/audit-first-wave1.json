@@ -49,7 +49,7 @@
         "definition_version": "2.*.*"
       },
       "assignment": {
-        "name": "apf-deny-classic-resources",
+        "name": "apf-classic-resources",
         "display_name": "APF - Deny classic resources",
         "description": "Preserves the legacy non-enforcing classic-resource guardrail at the APF root."
       },
@@ -152,7 +152,7 @@
         "definition_version": "2.*.*"
       },
       "assignment": {
-        "name": "apf-deny-hybrid-networking",
+        "name": "apf-hybrid-networking",
         "display_name": "APF - Deny hybrid networking in Corp",
         "description": "Preserves the legacy non-enforcing Corp guardrail for vWAN, ExpressRoute and VPN gateway resource types."
       },

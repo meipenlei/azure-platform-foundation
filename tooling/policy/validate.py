@@ -16,6 +16,8 @@ WAVE1_PROFILE = (
     / "audit-first-wave1.json"
 )
 
+POLICY_ASSIGNMENT_NAME_MAX_LENGTH = 24
+
 VALID_CLASSIFICATIONS = {
     "UPSTREAM",
     "APF_CUSTOM",
@@ -172,6 +174,7 @@ def validate_wave1_profile(versions: dict) -> None:
 
     actual: dict[str, tuple[str, str, str]] = {}
     seen_files: set[str] = set()
+    seen_assignment_names: set[str] = set()
 
     for assignment in assignments:
         legacy = str(assignment.get("legacy_assignment", ""))
@@ -179,6 +182,9 @@ def validate_wave1_profile(versions: dict) -> None:
         enforcement = str(assignment.get("enforcement_mode", ""))
         effect = str((assignment.get("parameters") or {}).get("effect", ""))
         file_name = str(assignment.get("file_name", ""))
+        assignment_name = str(
+            (assignment.get("assignment") or {}).get("name", "")
+        )
 
         if not file_name.endswith(".assignment.jsonc"):
             raise ValidationError(
@@ -189,6 +195,24 @@ def validate_wave1_profile(versions: dict) -> None:
                 f"Duplicate Wave 1 assignment file: {file_name}."
             )
         seen_files.add(file_name)
+
+        if not assignment_name:
+            raise ValidationError(
+                f"Azure Policy Assignment name missing for {legacy}."
+            )
+        if len(assignment_name) > POLICY_ASSIGNMENT_NAME_MAX_LENGTH:
+            raise ValidationError(
+                f"Azure Policy Assignment name {assignment_name!r} is "
+                f"{len(assignment_name)} characters long; management-group "
+                f"assignments are limited to "
+                f"{POLICY_ASSIGNMENT_NAME_MAX_LENGTH} characters."
+            )
+        if assignment_name in seen_assignment_names:
+            raise ValidationError(
+                f"Duplicate Azure Policy Assignment name: "
+                f"{assignment_name}."
+            )
+        seen_assignment_names.add(assignment_name)
 
         definition_version = (
             assignment.get("definition", {}).get("definition_version")
