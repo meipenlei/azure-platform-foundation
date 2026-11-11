@@ -1,0 +1,46 @@
+{
+  "schema_version": "0.1",
+  "name": "enterprise",
+  "adoption_mode": "audit_first",
+  "stage": "management_group_pilot",
+  "description": "APF Governance-as-Code pilot scoped to the Level 1 APF root management group. Remains plan-only and ownedOnly.",
+  "desired_state_strategy": "ownedOnly",
+  "scope_source": ".foundation/level1-management-groups.yaml",
+  "upstream": {
+    "library": "Azure/Azure-Landing-Zones-Library",
+    "alz_tag": "platform/alz/2026.11.0",
+    "assignment": "Deny-Public-IP"
+  },
+  "migration_provenance": {
+    "legacy_repository": "meipenlei/hci-foundation01",
+    "legacy_assignment": "CAF-Deny-Public-IP",
+    "classification": "UPSTREAM",
+    "preserved_behavior": [
+      "effect=Audit",
+      "enforcementMode=Default"
+    ]
+  },
+  "assignments": [
+    {
+      "key": "audit_public_ip",
+      "definition": {
+        "type": "builtin_policy",
+        "id": "/providers/Microsoft.Authorization/policyDefinitions/6c112d4e-5bc7-47ae-a041-ea2d9dccd749",
+        "display_name": "Not allowed resource types",
+        "definition_version": "2.*.*"
+      },
+      "assignment": {
+        "name": "apf-audit-public-ip",
+        "display_name": "APF - Audit public IP creation",
+        "description": "APF audit-first pilot. Audits creation of Public IP resources under the APF management-group hierarchy without enforcing a deny."
+      },
+      "enforcement_mode": "Default",
+      "parameters": {
+        "listOfResourceTypesNotAllowed": [
+          "Microsoft.Network/publicIPAddresses"
+        ],
+        "effect": "Audit"
+      }
+    }
+  ]
+}

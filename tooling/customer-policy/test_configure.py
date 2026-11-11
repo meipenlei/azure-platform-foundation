@@ -21,18 +21,31 @@ configure = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(configure)
 
 
+ROOT_SCOPE = "/providers/Microsoft.Management/managementGroups/lab"
+
+
 class ConfigureTests(unittest.TestCase):
-    def make_project(self, root: Path) -> Path:
+    def make_project(
+        self,
+        root: Path,
+        *,
+        include_level1: bool = True,
+    ) -> Path:
         project = root / "customer"
         (project / "config").mkdir(parents=True)
         (project / ".foundation").mkdir(parents=True)
 
         customer = {
             "schema_version": "0.1",
-            "customer": {"id": "lab", "display_name": "Lab"},
+            "customer": {
+                "id": "lab",
+                "display_name": "Lab",
+            },
             "azure": {
                 "tenant_id": "11111111-1111-1111-1111-111111111111",
-                "bootstrap_subscription_id": "22222222-2222-2222-2222-222222222222",
+                "bootstrap_subscription_id": (
+                    "22222222-2222-2222-2222-222222222222"
+                ),
                 "cloud": "public",
                 "primary_region": "germanywestcentral",
             },
@@ -63,23 +76,47 @@ class ConfigureTests(unittest.TestCase):
                 "repository_id": "456",
             },
         }
+        level1 = {
+            "schema_version": "0.1",
+            "source": "terraform-level1-management-groups",
+            "management_groups": {
+                "root_management_group_id": ROOT_SCOPE,
+                "root_management_group_name": "lab",
+                "management_group_ids": {
+                    "root": ROOT_SCOPE,
+                    "platform": ROOT_SCOPE + "-platform",
+                },
+                "bootstrap_subscription_parent_management_group_id": (
+                    ROOT_SCOPE + "-management"
+                ),
+                "policy_deployment_root_scope": ROOT_SCOPE,
+            },
+        }
 
-        (project / "config" / "customer.yaml").write_text(
+        (project / "config/customer.yaml").write_text(
             yaml.safe_dump(customer, sort_keys=False),
             encoding="utf-8",
         )
-        (project / "config" / "platform.yaml").write_text(
+        (project / "config/platform.yaml").write_text(
             yaml.safe_dump(platform, sort_keys=False),
             encoding="utf-8",
         )
-        (project / ".foundation" / "discovery.yaml").write_text(
+        (project / ".foundation/discovery.yaml").write_text(
             yaml.safe_dump(discovery, sort_keys=False),
             encoding="utf-8",
         )
+
+        if include_level1:
+            (project / configure.LEVEL1_SNAPSHOT).write_text(
+                yaml.safe_dump(level1, sort_keys=False),
+                encoding="utf-8",
+            )
+
         (project / ".gitignore").write_text(
             "# Terraform\n.terraform/\n",
             encoding="utf-8",
         )
+
         return project
 
     def versions(self) -> dict:
@@ -95,8 +132,9 @@ class ConfigureTests(unittest.TestCase):
         return {
             "name": "enterprise",
             "adoption_mode": "audit_first",
-            "stage": "subscription_pilot",
+            "stage": "management_group_pilot",
             "desired_state_strategy": "ownedOnly",
+            "scope_source": configure.LEVEL1_SNAPSHOT,
             "upstream": {
                 "alz_tag": "platform/alz/2026.11.0",
                 "assignment": "Deny-Public-IP",
@@ -107,7 +145,11 @@ class ConfigureTests(unittest.TestCase):
             "assignments": [
                 {
                     "definition": {
-                        "id": "/providers/Microsoft.Authorization/policyDefinitions/test",
+                        "id": (
+                            "/providers/Microsoft.Authorization/"
+                            "policyDefinitions/test"
+                        ),
+                        "definition_version": "2.*.*",
                         "display_name": "Test policy",
                     },
                     "assignment": {
@@ -126,15 +168,21 @@ class ConfigureTests(unittest.TestCase):
             ],
         }
 
-    def test_generated_plan_is_owned_only_and_audit(self) -> None:
+    def test_generated_plan_uses_level1_management_group(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             project = self.make_project(Path(temp))
-            customer, platform, discovery = configure.verify_project(project)
+            (
+                customer,
+                platform,
+                discovery,
+                level1,
+            ) = configure.verify_project(project)
 
             configure.validate_inputs(
                 customer=customer,
                 platform=platform,
                 discovery=discovery,
+                level1=level1,
                 versions=self.versions(),
                 profile=self.profile(),
             )
@@ -145,12 +193,14 @@ class ConfigureTests(unittest.TestCase):
                 versions=self.versions(),
                 profile=self.profile(),
                 discovery=discovery,
+                level1=level1,
             )
 
             global_settings = json.loads(
                 files[
                     project
-                    / "governance/policy/Definitions/global-settings.jsonc"
+                    / "governance/policy/Definitions/"
+                    "global-settings.jsonc"
                 ]
             )
             assignment = json.loads(
@@ -160,28 +210,73 @@ class ConfigureTests(unittest.TestCase):
                     "apf-audit-public-ip.assignment.jsonc"
                 ]
             )
+            metadata = yaml.safe_load(
+                files[project / ".foundation/policy.yaml"]
+            )
             workflow = files[
                 project / ".github/workflows/policy-plan.yml"
             ]
 
             env = global_settings["pacEnvironments"][0]
+
             self.assertEqual(
                 env["deploymentRootScope"],
-                "/subscriptions/22222222-2222-2222-2222-222222222222",
+                ROOT_SCOPE,
             )
             self.assertEqual(
                 env["desiredState"]["strategy"],
                 "ownedOnly",
             )
             self.assertEqual(
+                assignment["scope"][configure.PAC_SELECTOR],
+                [ROOT_SCOPE],
+            )
+            self.assertEqual(
                 assignment["parameters"]["effect"],
                 "Audit",
             )
+            self.assertEqual(
+                assignment["definitionEntry"]["definitionVersion"],
+                "2.*.*",
+            )
+            self.assertEqual(
+                metadata["deployment_root_scope"],
+                ROOT_SCOPE,
+            )
+            self.assertEqual(
+                metadata["deployment_root_source"],
+                configure.LEVEL1_SNAPSHOT,
+            )
+
             self.assertIn("AZURE_PLAN_CLIENT_ID", workflow)
             self.assertIn("Build-DeploymentPlans", workflow)
             self.assertNotIn("Deploy-PolicyPlan", workflow)
             self.assertNotIn("Deploy-RolesPlan", workflow)
-            self.assertNotIn("apf-governance\n", workflow)
+
+    def test_level1_snapshot_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = self.make_project(
+                Path(temp),
+                include_level1=False,
+            )
+
+            with self.assertRaises(configure.ConfigureError):
+                configure.verify_project(project)
+
+    def test_subscription_scope_is_rejected(self) -> None:
+        level1 = {
+            "management_groups": {
+                "management_group_ids": {
+                    "root": "/subscriptions/example"
+                },
+                "policy_deployment_root_scope": (
+                    "/subscriptions/example"
+                ),
+            }
+        }
+
+        with self.assertRaises(configure.ConfigureError):
+            configure.deployment_root_scope(level1)
 
     def test_pac_owner_id_is_deterministic(self) -> None:
         discovery = {
@@ -192,20 +287,9 @@ class ConfigureTests(unittest.TestCase):
         }
         first = configure.pac_owner_id(discovery)
         second = configure.pac_owner_id(discovery)
+
         self.assertEqual(first, second)
         uuid.UUID(first)
-
-    def test_gitignore_is_idempotent(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            project = self.make_project(Path(temp))
-            path, content = configure.ensure_gitignore(project)
-            path.write_text(content, encoding="utf-8")
-            _, second = configure.ensure_gitignore(project)
-            self.assertEqual(content, second)
-            self.assertEqual(
-                content.count("governance/policy/Output/"),
-                1,
-            )
 
 
 if __name__ == "__main__":

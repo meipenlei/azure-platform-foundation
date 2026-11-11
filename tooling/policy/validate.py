@@ -13,7 +13,7 @@ PILOT_PROFILE = (
     POLICY_ROOT
     / "profiles"
     / "enterprise"
-    / "audit-first-subscription-pilot.json"
+    / "audit-first-management-group-pilot.json"
 )
 
 VALID_CLASSIFICATIONS = {
@@ -33,8 +33,10 @@ def load_json(path: Path) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValidationError(f"Invalid JSON {path}: {exc}") from exc
+
     if not isinstance(data, dict):
         raise ValidationError(f"{path} must contain a JSON object.")
+
     return data
 
 
@@ -80,7 +82,11 @@ def validate_global_settings_template() -> None:
         "[[ desired_state_strategy ]]",
     )
 
-    missing = [token for token in required_tokens if token not in content]
+    missing = [
+        token
+        for token in required_tokens
+        if token not in content
+    ]
     if missing:
         raise ValidationError(
             "global-settings template is missing: "
@@ -132,14 +138,29 @@ def validate_pilot_profile(versions: dict) -> None:
     profile = load_json(PILOT_PROFILE)
 
     if profile.get("name") != "enterprise":
-        raise ValidationError("Commit 11 pilot profile must be enterprise.")
+        raise ValidationError(
+            "Management-group pilot profile must be enterprise."
+        )
     if profile.get("adoption_mode") != "audit_first":
-        raise ValidationError("Commit 11 pilot must be audit_first.")
-    if profile.get("stage") != "subscription_pilot":
-        raise ValidationError("Commit 11 pilot must use subscription_pilot.")
+        raise ValidationError(
+            "Management-group pilot must be audit_first."
+        )
+    if profile.get("stage") != "management_group_pilot":
+        raise ValidationError(
+            "Active pilot must use management_group_pilot."
+        )
     if profile.get("desired_state_strategy") != "ownedOnly":
         raise ValidationError(
-            "Commit 11 pilot must use desiredState.strategy=ownedOnly."
+            "Management-group pilot must use "
+            "desiredState.strategy=ownedOnly."
+        )
+    if (
+        profile.get("scope_source")
+        != ".foundation/level1-management-groups.yaml"
+    ):
+        raise ValidationError(
+            "Management-group pilot must derive scope from "
+            "the Level 1 snapshot."
         )
 
     alz_tag = versions["azure_landing_zones_library"]["alz_tag"]
@@ -151,17 +172,27 @@ def validate_pilot_profile(versions: dict) -> None:
     assignments = profile.get("assignments")
     if not isinstance(assignments, list) or len(assignments) != 1:
         raise ValidationError(
-            "Commit 11 pilot must contain exactly one assignment."
+            "Management-group pilot must contain exactly one assignment."
         )
 
     assignment = assignments[0]
+
     if assignment.get("parameters", {}).get("effect") != "Audit":
         raise ValidationError(
-            "Commit 11 pilot assignment must remain Audit."
+            "Management-group pilot assignment must remain Audit."
         )
     if assignment.get("enforcement_mode") != "Default":
         raise ValidationError(
-            "Commit 11 pilot must preserve legacy enforcementMode=Default."
+            "Management-group pilot must preserve "
+            "legacy enforcementMode=Default."
+        )
+    if (
+        assignment.get("definition", {}).get("definition_version")
+        != "2.*.*"
+    ):
+        raise ValidationError(
+            "Management-group pilot must pin the built-in policy "
+            "to major version 2."
         )
 
 
