@@ -53,6 +53,9 @@ The protected apply path is:
         |
         v
     zero-change convergence check
+        |
+        +-- expected new assignment still visible?
+               bounded retry (5 attempts, 30s interval)
 
 The Governance UAMI uses the existing environment-scoped OIDC federation. No
 client secret, PAT or storage key is introduced.
@@ -109,5 +112,15 @@ later capability increment.
 After deployment, APF runs `Build-DeploymentPlans` again against Azure. The
 post-apply guard requires zero policy changes and zero role changes.
 
-A non-zero post-apply plan fails the workflow even if the deployment command
-itself succeeded. This makes convergence part of the apply contract.
+A non-zero post-apply plan normally fails the workflow even if the deployment
+command itself succeeded. The one bounded exception is Azure read-after-write
+propagation for assignments that the protected apply just created. If the
+post-apply plan contains only expected assignment IDs still reported as `new`,
+the verifier returns a retryable status and the workflow rebuilds the plan up
+to five times with a 30-second interval.
+
+Updates, replaces, deletes, role changes, unknown assignment IDs, definition
+changes, exemptions and enrollments remain immediately fatal and are never
+retried. If the expected assignments are still reported as new after the final
+attempt, the workflow fails. This keeps convergence strict while avoiding false
+negatives from Azure control-plane propagation.

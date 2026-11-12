@@ -18,6 +18,12 @@ class PlanVerificationError(RuntimeError):
     pass
 
 
+class RetryableConvergenceError(PlanVerificationError):
+    """Azure read-after-write propagation may not have converged yet."""
+
+    pass
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -242,8 +248,9 @@ def verify_policy_plan(
         )
 
     if mode == "post-apply" and planned_ids:
-        raise PlanVerificationError(
-            "Post-apply verification still contains new policy assignments: "
+        raise RetryableConvergenceError(
+            "Post-apply verification still contains expected new policy "
+            "assignments; Azure may still be converging: "
             + ", ".join(sorted(planned_ids))
         )
 
@@ -338,6 +345,9 @@ def main() -> int:
             print("[PASS] Remaining policy changes: 0.")
             print("[PASS] Remaining role changes: 0.")
         return 0
+    except RetryableConvergenceError as exc:
+        print(f"[RETRY] {exc}", file=sys.stderr)
+        return 3
     except (PlanVerificationError, OSError, KeyError, TypeError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 2

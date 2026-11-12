@@ -594,6 +594,8 @@ env:
   POLICY_DEFINITIONS_ROOT: "${{{{ github.workspace }}}}/governance/policy/Definitions"
   POLICY_OUTPUT: "${{{{ github.workspace }}}}/governance/policy/Output"
   POLICY_POST_APPLY_OUTPUT: "${{{{ github.workspace }}}}/governance/policy/PostApplyOutput"
+  POST_APPLY_MAX_ATTEMPTS: "5"
+  POST_APPLY_RETRY_SECONDS: "30"
 
 jobs:
   policy-apply:
@@ -697,32 +699,56 @@ jobs:
             -PacEnvironmentSelector $env:PAC_SELECTOR `
             -InputFolder $env:POLICY_OUTPUT
 
-      - name: Rebuild EPAC plan after apply
+      - name: Verify post-apply convergence with bounded retry
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (Test-Path $env:POLICY_POST_APPLY_OUTPUT) {{
-            Remove-Item `
-              -Path $env:POLICY_POST_APPLY_OUTPUT `
-              -Recurse `
-              -Force
+          $maxAttempts = [int]$env:POST_APPLY_MAX_ATTEMPTS
+          $retrySeconds = [int]$env:POST_APPLY_RETRY_SECONDS
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {{
+            Write-Host "Post-apply convergence attempt $attempt of $maxAttempts."
+
+            if (Test-Path $env:POLICY_POST_APPLY_OUTPUT) {{
+              Remove-Item `
+                -Path $env:POLICY_POST_APPLY_OUTPUT `
+                -Recurse `
+                -Force
+            }}
+
+            Build-DeploymentPlans `
+              -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
+              -PacEnvironmentSelector $env:PAC_SELECTOR `
+              -OutputFolder $env:POLICY_POST_APPLY_OUTPUT
+
+            & python governance/policy/tooling/verify_apply_plan.py `
+              --mode post-apply `
+              --definitions-root $env:POLICY_DEFINITIONS_ROOT `
+              --pac-selector $env:PAC_SELECTOR `
+              --policy-plan "$env:POLICY_POST_APPLY_OUTPUT/plans-$env:PAC_SELECTOR/policy-plan.json" `
+              --roles-plan "$env:POLICY_POST_APPLY_OUTPUT/plans-$env:PAC_SELECTOR/roles-plan.json"
+
+            $verifyExit = $LASTEXITCODE
+
+            if ($verifyExit -eq 0) {{
+              exit 0
+            }}
+
+            if ($verifyExit -ne 3) {{
+              throw "Post-apply verification failed with non-retryable exit code $verifyExit."
+            }}
+
+            if ($attempt -eq $maxAttempts) {{
+              throw "Post-apply convergence did not complete after $maxAttempts attempts."
+            }}
+
+            Write-Warning (
+              "Azure policy state has not converged yet. " +
+              "Retrying in $retrySeconds seconds."
+            )
+            Start-Sleep -Seconds $retrySeconds
           }}
-
-          Build-DeploymentPlans `
-            -DefinitionsRootFolder $env:POLICY_DEFINITIONS_ROOT `
-            -PacEnvironmentSelector $env:PAC_SELECTOR `
-            -OutputFolder $env:POLICY_POST_APPLY_OUTPUT
-
-      - name: Verify post-apply convergence
-        shell: bash
-        run: |
-          python governance/policy/tooling/verify_apply_plan.py \\
-            --mode post-apply \\
-            --definitions-root "$POLICY_DEFINITIONS_ROOT" \\
-            --pac-selector "$PAC_SELECTOR" \\
-            --policy-plan "$POLICY_POST_APPLY_OUTPUT/plans-$PAC_SELECTOR/policy-plan.json" \\
-            --roles-plan "$POLICY_POST_APPLY_OUTPUT/plans-$PAC_SELECTOR/roles-plan.json"
 '''
 
 def render_policy_readme(

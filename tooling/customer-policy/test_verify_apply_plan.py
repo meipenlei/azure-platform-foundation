@@ -270,7 +270,7 @@ class VerifyApplyPlanTests(unittest.TestCase):
 
             self.assertEqual(result, (0, 0))
 
-    def test_post_apply_rejects_remaining_assignment(self) -> None:
+    def test_post_apply_marks_remaining_expected_assignment_retryable(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             definitions = self.make_definitions(root)
@@ -283,7 +283,7 @@ class VerifyApplyPlanTests(unittest.TestCase):
             )
 
             with self.assertRaises(
-                verify_apply_plan.PlanVerificationError
+                verify_apply_plan.RetryableConvergenceError
             ):
                 verify_apply_plan.verify(
                     self.args(
@@ -293,6 +293,31 @@ class VerifyApplyPlanTests(unittest.TestCase):
                         mode="post-apply",
                     )
                 )
+
+
+    def test_main_returns_retry_exit_code_for_expected_post_apply_new(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            definitions = self.make_definitions(root)
+            policy_plan = root / "Output/policy-plan.json"
+            roles_plan = root / "Output/roles-plan.json"
+
+            self.write_policy_plan(
+                policy_plan,
+                new={ASSIGNMENT_ID: {"displayName": "Test"}},
+            )
+
+            original_parse_args = verify_apply_plan.parse_args
+            try:
+                verify_apply_plan.parse_args = lambda: self.args(
+                    definitions=definitions,
+                    policy_plan=policy_plan,
+                    roles_plan=roles_plan,
+                    mode="post-apply",
+                )
+                self.assertEqual(verify_apply_plan.main(), 3)
+            finally:
+                verify_apply_plan.parse_args = original_parse_args
 
 
 if __name__ == "__main__":

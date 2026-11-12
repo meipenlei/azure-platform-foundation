@@ -230,6 +230,10 @@ class ConfigureTests(unittest.TestCase):
             self.assertIn("governance/policy/tooling/verify_apply_plan.py", apply)
             self.assertIn("--mode pre-apply", apply)
             self.assertIn("--mode post-apply", apply)
+            self.assertIn('POST_APPLY_MAX_ATTEMPTS: "5"', apply)
+            self.assertIn('POST_APPLY_RETRY_SECONDS: "30"', apply)
+            self.assertIn("Start-Sleep -Seconds $retrySeconds", apply)
+            self.assertIn("$verifyExit -ne 3", apply)
             self.assertNotIn("AZURE_PLAN_CLIENT_ID", apply)
             self.assertIn("Protected apply", guard)
 
