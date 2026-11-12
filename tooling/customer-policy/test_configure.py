@@ -119,11 +119,11 @@ class ConfigureTests(unittest.TestCase):
         return json.loads(
             (
                 Path(__file__).resolve().parents[2]
-                / "foundation/policy/profiles/enterprise/audit-first-wave1.json"
+                / "foundation/policy/profiles/enterprise/audit-first-wave2.json"
             ).read_text(encoding="utf-8")
         )
 
-    def test_wave1_generates_four_scope_aware_assignments(self) -> None:
+    def test_wave2_generates_eight_scope_aware_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             project = self.make_project(Path(temp))
             customer, platform, discovery, level1 = configure.verify_project(project)
@@ -154,25 +154,51 @@ class ConfigureTests(unittest.TestCase):
                 if path.parent == assignment_dir
             }
 
-            self.assertEqual(len(generated), 4)
+            self.assertEqual(len(generated), 8)
 
             expected = {
-                "apf-audit-public-ip.assignment.jsonc": ("identity", "Default", "Audit"),
-                "apf-deny-classic-resources.assignment.jsonc": ("root", "DoNotEnforce", "Deny"),
-                "apf-deny-storage-http.assignment.jsonc": ("landing_zones", "DoNotEnforce", "Deny"),
-                "apf-deny-hybrid-networking.assignment.jsonc": ("corp", "DoNotEnforce", "Deny"),
+                "apf-audit-public-ip.assignment.jsonc": (1, "identity", "Default", "Audit"),
+                "apf-deny-classic-resources.assignment.jsonc": (1, "root", "DoNotEnforce", "Deny"),
+                "apf-deny-storage-http.assignment.jsonc": (1, "landing_zones", "DoNotEnforce", "Deny"),
+                "apf-deny-hybrid-networking.assignment.jsonc": (1, "corp", "DoNotEnforce", "Deny"),
+                "apf-audit-resource-rg-location.assignment.jsonc": (2, "root", "Default", None),
+                "apf-audit-appgw-waf.assignment.jsonc": (2, "landing_zones", "Default", "Audit"),
+                "apf-deny-priv-esc-aks.assignment.jsonc": (2, "landing_zones", "DoNotEnforce", "Deny"),
+                "apf-deny-privileged-aks.assignment.jsonc": (2, "landing_zones", "DoNotEnforce", "Deny"),
             }
 
-            for filename, (scope_key, enforcement, effect) in expected.items():
+            for filename, (wave, scope_key, enforcement, effect) in expected.items():
                 doc = generated[filename]
                 self.assertEqual(doc["scope"][configure.PAC_SELECTOR], [MG_IDS[scope_key]])
                 self.assertEqual(doc["enforcementMode"], enforcement)
-                self.assertEqual(doc["parameters"]["effect"], effect)
+                self.assertEqual(doc["parameters"].get("effect"), effect)
                 self.assertEqual(doc["metadata"]["apfScopeKey"], scope_key)
+                self.assertIn(f"/Wave{wave}/", doc["nodeName"])
+
+            # Wave 1 Azure assignment payloads retain their original stage metadata.
+            self.assertEqual(
+                generated["apf-audit-public-ip.assignment.jsonc"]["metadata"]["apfStage"],
+                "scope_aware_wave1",
+            )
+            self.assertEqual(
+                generated["apf-audit-appgw-waf.assignment.jsonc"]["metadata"]["apfStage"],
+                "scope_aware_wave2",
+            )
+
+            waf = next(
+                item for item in profile["assignments"]
+                if item["key"] == "audit_appgw_waf"
+            )
+            self.assertEqual(waf["legacy_redundant_archetypes"], ["es_online"])
+            self.assertEqual(
+                generated["apf-audit-appgw-waf.assignment.jsonc"]["scope"][configure.PAC_SELECTOR],
+                [MG_IDS["landing_zones"]],
+            )
 
             metadata = yaml.safe_load(files[project / ".foundation/policy.yaml"])
-            self.assertEqual(metadata["profile"]["assignment_count"], 4)
-            self.assertEqual(metadata["profile"]["stage"], "scope_aware_wave1")
+            self.assertEqual(metadata["profile"]["assignment_count"], 8)
+            self.assertEqual(metadata["profile"]["wave"], 2)
+            self.assertEqual(metadata["profile"]["stage"], "scope_aware_wave2")
             self.assertEqual(metadata["desired_state_strategy"], "ownedOnly")
 
     def test_unknown_scope_key_is_rejected(self) -> None:

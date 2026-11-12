@@ -15,6 +15,12 @@ WAVE1_PROFILE = (
     / "enterprise"
     / "audit-first-wave1.json"
 )
+WAVE2_PROFILE = (
+    POLICY_ROOT
+    / "profiles"
+    / "enterprise"
+    / "audit-first-wave2.json"
+)
 
 POLICY_ASSIGNMENT_NAME_MAX_LENGTH = 24
 
@@ -30,6 +36,17 @@ EXPECTED_WAVE1 = {
     "Deny-Classic-Resources": ("root", "DoNotEnforce", "Deny"),
     "Deny-Storage-http": ("landing_zones", "DoNotEnforce", "Deny"),
     "Deny-HybridNetworking": ("corp", "DoNotEnforce", "Deny"),
+}
+
+EXPECTED_WAVE2 = {
+    "CAF-Deny-Public-IP": (1, "identity", "Default", "Audit"),
+    "Deny-Classic-Resources": (1, "root", "DoNotEnforce", "Deny"),
+    "Deny-Storage-http": (1, "landing_zones", "DoNotEnforce", "Deny"),
+    "Deny-HybridNetworking": (1, "corp", "DoNotEnforce", "Deny"),
+    "Audit-ResourceRGLocation": (2, "root", "Default", "Audit"),
+    "Audit-AppGW-WAF": (2, "landing_zones", "Default", "Audit"),
+    "Deny-Priv-Esc-AKS": (2, "landing_zones", "DoNotEnforce", "Deny"),
+    "Deny-Privileged-AKS": (2, "landing_zones", "DoNotEnforce", "Deny"),
 }
 
 
@@ -231,6 +248,140 @@ def validate_wave1_profile(versions: dict) -> None:
         )
 
 
+
+def validate_wave2_profile(versions: dict) -> None:
+    profile = load_json(WAVE2_PROFILE)
+
+    if profile.get("name") != "enterprise":
+        raise ValidationError("Wave 2 profile must be enterprise.")
+    if profile.get("adoption_mode") != "audit_first":
+        raise ValidationError("Wave 2 must be audit_first.")
+    if profile.get("wave") != 2:
+        raise ValidationError("Active profile must declare wave=2.")
+    if profile.get("stage") != "scope_aware_wave2":
+        raise ValidationError("Active profile must use scope_aware_wave2.")
+    if profile.get("desired_state_strategy") != "ownedOnly":
+        raise ValidationError(
+            "Wave 2 must use desiredState.strategy=ownedOnly."
+        )
+    if (
+        profile.get("scope_source")
+        != ".foundation/level1-management-groups.yaml"
+    ):
+        raise ValidationError(
+            "Wave 2 must derive scopes from the Level 1 snapshot."
+        )
+
+    alz_tag = versions["azure_landing_zones_library"]["alz_tag"]
+    if profile.get("upstream", {}).get("alz_tag") != alz_tag:
+        raise ValidationError(
+            "Wave 2 ALZ tag does not match versions.json."
+        )
+
+    assignments = profile.get("assignments")
+    if not isinstance(assignments, list) or len(assignments) != 8:
+        raise ValidationError(
+            "Commit 16 Wave 2 must contain exactly eight cumulative assignments."
+        )
+
+    actual: dict[str, tuple[int, str, str, str]] = {}
+    seen_files: set[str] = set()
+    seen_assignment_names: set[str] = set()
+
+    for assignment in assignments:
+        legacy = str(assignment.get("legacy_assignment", ""))
+        wave = assignment.get("wave")
+        scope_key = str(assignment.get("scope_key", ""))
+        enforcement = str(assignment.get("enforcement_mode", ""))
+        semantic_effect = str(assignment.get("semantic_effect", ""))
+        file_name = str(assignment.get("file_name", ""))
+        assignment_name = str(
+            (assignment.get("assignment") or {}).get("name", "")
+        )
+
+        if wave not in (1, 2):
+            raise ValidationError(
+                f"Invalid Wave 2 assignment wave for {legacy}: {wave!r}."
+            )
+        if not file_name.endswith(".assignment.jsonc"):
+            raise ValidationError(
+                f"Invalid Wave 2 assignment file name: {file_name!r}."
+            )
+        if file_name in seen_files:
+            raise ValidationError(
+                f"Duplicate Wave 2 assignment file: {file_name}."
+            )
+        seen_files.add(file_name)
+
+        if not assignment_name:
+            raise ValidationError(
+                f"Azure Policy Assignment name missing for {legacy}."
+            )
+        if len(assignment_name) > POLICY_ASSIGNMENT_NAME_MAX_LENGTH:
+            raise ValidationError(
+                f"Azure Policy Assignment name {assignment_name!r} is "
+                f"{len(assignment_name)} characters long; management-group "
+                f"assignments are limited to "
+                f"{POLICY_ASSIGNMENT_NAME_MAX_LENGTH} characters."
+            )
+        if assignment_name in seen_assignment_names:
+            raise ValidationError(
+                f"Duplicate Azure Policy Assignment name: "
+                f"{assignment_name}."
+            )
+        seen_assignment_names.add(assignment_name)
+
+        definition = assignment.get("definition", {})
+        definition_id = str(definition.get("id", ""))
+        definition_version = definition.get("definition_version")
+        if not definition_id.startswith(
+            "/providers/Microsoft.Authorization/policy"
+        ):
+            raise ValidationError(
+                f"Wave 2 assignment {legacy} must reference a built-in "
+                "policy or policy set."
+            )
+        if not definition_version:
+            raise ValidationError(
+                f"Definition version missing for {legacy}."
+            )
+
+        expected_stage = f"scope_aware_wave{wave}"
+        if assignment.get("stage") != expected_stage:
+            raise ValidationError(
+                f"Assignment {legacy} must preserve stage "
+                f"{expected_stage}."
+            )
+
+        actual[legacy] = (
+            int(wave),
+            scope_key,
+            enforcement,
+            semantic_effect,
+        )
+
+    if actual != EXPECTED_WAVE2:
+        raise ValidationError(
+            "Wave 2 scope/enforcement/effect mapping does not match the "
+            "curated cumulative baseline."
+        )
+
+    waf = next(
+        item
+        for item in assignments
+        if item.get("legacy_assignment") == "Audit-AppGW-WAF"
+    )
+    if waf.get("legacy_redundant_archetypes") != ["es_online"]:
+        raise ValidationError(
+            "Audit-AppGW-WAF must document the collapsed legacy Online "
+            "assignment."
+        )
+    if waf.get("scope_key") != "landing_zones":
+        raise ValidationError(
+            "Audit-AppGW-WAF must be assigned once at Landing Zones so "
+            "Online inherits it."
+        )
+
 def main() -> int:
     try:
         versions = validate_versions()
@@ -238,6 +389,7 @@ def main() -> int:
         validate_library_json()
         validate_migration_map(versions)
         validate_wave1_profile(versions)
+        validate_wave2_profile(versions)
         print("[PASS] APF policy foundation validation.")
         return 0
     except (ValidationError, OSError, KeyError) as exc:

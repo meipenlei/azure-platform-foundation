@@ -20,7 +20,7 @@ PROFILE_PATH = (
     / "policy"
     / "profiles"
     / "enterprise"
-    / "audit-first-wave1.json"
+    / "audit-first-wave2.json"
 )
 
 PAC_SELECTOR = "apf-governance"
@@ -199,8 +199,12 @@ def validate_profile(
 
     if not isinstance(assignments, list) or len(assignments) < 2:
         raise ConfigureError(
-            "Scope-aware Wave 1 must contain multiple assignments."
+            "Scope-aware Wave 2 must contain multiple assignments."
         )
+
+    current_wave = profile.get("wave")
+    if not isinstance(current_wave, int) or current_wave < 1:
+        raise ConfigureError("Policy profile wave must be a positive integer.")
 
     seen_keys: set[str] = set()
     seen_files: set[str] = set()
@@ -217,6 +221,17 @@ def validate_profile(
         assignment_name = str(
             (assignment.get("assignment") or {}).get("name", "")
         )
+        assignment_wave = assignment.get("wave")
+
+        if (
+            not isinstance(assignment_wave, int)
+            or assignment_wave < 1
+            or assignment_wave > current_wave
+        ):
+            raise ConfigureError(
+                f"Policy assignment wave is invalid for {key!r}: "
+                f"{assignment_wave!r}."
+            )
 
         if not key or key in seen_keys:
             raise ConfigureError(
@@ -309,18 +324,23 @@ def validate_inputs(
 
         if profile["desired_state_strategy"] != "ownedOnly":
             raise ConfigureError(
-                "Scope-aware Wave 1 must use "
+                "Scope-aware Wave 2 must use "
                 "desiredState.strategy=ownedOnly."
             )
 
-        if profile["stage"] != "scope_aware_wave1":
+        if profile.get("wave") != 2:
             raise ConfigureError(
-                "Active policy profile must use scope_aware_wave1."
+                "Active policy profile must use wave=2."
+            )
+
+        if profile["stage"] != "scope_aware_wave2":
+            raise ConfigureError(
+                "Active policy profile must use scope_aware_wave2."
             )
 
         if profile.get("scope_source") != LEVEL1_SNAPSHOT:
             raise ConfigureError(
-                "Scope-aware Wave 1 must derive scopes from "
+                "Scope-aware Wave 2 must derive scopes from "
                 "the Level 1 snapshot."
             )
 
@@ -386,6 +406,8 @@ def render_assignment(
 ) -> str:
     definition = assignment["definition"]
     assignment_meta = assignment["assignment"]
+    assignment_wave = assignment["wave"]
+    assignment_stage = assignment.get("stage", profile["stage"])
 
     document = {
         "$schema": (
@@ -394,7 +416,7 @@ def render_assignment(
             "Schemas/policy-assignment-schema.json"
         ),
         "nodeName": (
-            f"/APF/Enterprise/AuditFirst/Wave1/"
+            f"/APF/Enterprise/AuditFirst/Wave{assignment_wave}/"
             f"{assignment['key']}/"
         ),
         "definitionEntry": {
@@ -410,7 +432,7 @@ def render_assignment(
         "metadata": {
             "apfProfile": profile["name"],
             "apfAdoptionMode": profile["adoption_mode"],
-            "apfStage": profile["stage"],
+            "apfStage": assignment_stage,
             "apfScopeSource": profile["scope_source"],
             "apfScopeKey": assignment["scope_key"],
             "apfUpstreamAssignment": assignment["upstream_assignment"],
@@ -458,6 +480,7 @@ def render_policy_metadata(
             "name": profile["name"],
             "adoption_mode": profile["adoption_mode"],
             "stage": profile["stage"],
+            "wave": profile["wave"],
             "assignment_count": len(profile["assignments"]),
         },
         "assignment_scopes": scopes,
@@ -782,18 +805,19 @@ def render_policy_readme(
         f"Desired-state strategy: `{profile['desired_state_strategy']}`  ",
         f"Deployment root: `{deployment_root_scope(level1)}`",
         "",
-        "## Scope-aware Wave 1",
+        f"## Scope-aware Wave {profile['wave']}",
         "",
-        "| Assignment | Legacy archetype | APF scope | Behavior |",
-        "| --- | --- | --- | --- |",
+        "| Wave | Assignment | Legacy archetype | APF scope | Behavior |",
+        "| ---: | --- | --- | --- | --- |",
     ]
 
     for assignment in profile["assignments"]:
         behavior = (
             f"{assignment['enforcement_mode']}; "
-            f"effect={assignment.get('parameters', {}).get('effect', 'n/a')}"
+            f"effect={assignment.get('semantic_effect', assignment.get('parameters', {}).get('effect', 'n/a'))}"
         )
         lines.append(
+            f"| {assignment['wave']} "
             f"| `{assignment['upstream_assignment']}` "
             f"| `{assignment['legacy_archetype']}` "
             f"| `{assignment['scope_key']}` "
@@ -1009,7 +1033,7 @@ def main() -> int:
         write_files(files)
 
         print()
-        print("[PASS] APF scope-aware Wave 1 desired state and protected apply workflow generated.")
+        print("[PASS] APF scope-aware Wave 2 desired state and protected apply workflow generated.")
         print(
             "[PASS] No Azure Policy resources were changed by the generator; "
             "Azure mutation remains isolated to the protected manual apply workflow."

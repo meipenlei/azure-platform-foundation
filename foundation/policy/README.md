@@ -49,41 +49,23 @@ migration inputs and must not be normalized away.
 
 ## Commit 14 — Scope-aware Audit-First Wave 1
 
-The active profile is:
+The Wave 1 profile is:
 
     foundation/policy/profiles/enterprise/audit-first-wave1.json
 
-It contains four curated UPSTREAM assignments. Each assignment records:
-
-- pinned upstream ALZ assignment name;
-- legacy assignment name;
-- legacy archetype;
-- APF Level 1 scope key;
-- policy definition ID and version;
-- legacy enforcement mode;
-- legacy effect/parameters.
-
-The current mapping is:
+It established four curated assignments:
 
     CAF-Deny-Public-IP      -> identity
     Deny-Classic-Resources  -> root
     Deny-Storage-http       -> landing_zones
     Deny-HybridNetworking   -> corp
 
-The EPAC deployment root remains the APF root management group and desired state
-remains:
-
-    desiredState.strategy = ownedOnly
-
-Commit 14 remains plan-only. There is no Policy Apply workflow.
-
-Controls from the legacy `security` archetype are intentionally deferred until
-APF defines an explicit scope model for that horizontal concern.
+At the Commit 14 boundary the lifecycle was still plan-only.
 
 ## Commit 15 — Protected Policy Apply
 
-Commit 15 does not add policy content. It introduces the first Azure mutation
-path for the reviewed Wave 1 desired state.
+Commit 15 introduced the first Azure mutation path for the reviewed desired
+state without adding policy content.
 
 The generated customer workflow is:
 
@@ -94,22 +76,36 @@ environment and authenticates with the Governance UAMI through OIDC.
 
 Before deployment, EPAC rebuilds the plan from the current `main` branch. APF
 then verifies that the plan contains only additive Policy Assignments already
-represented in the generated Definitions tree. The guard rejects:
+represented in the generated Definitions tree. Deletes, replacements, updates,
+Policy Definition/Set changes, exemptions and Role Assignment changes remain
+blocked.
 
-- Policy Assignment updates, replacements or deletes;
-- Policy Definition changes;
-- Policy Set Definition changes;
-- Policy Exemption changes;
-- Policy Enrollment changes;
-- Role Assignment changes.
+Post-apply convergence uses bounded retry so Azure Policy read-after-write
+propagation does not create a false-negative deployment result. A non-retryable
+drift shape still fails immediately.
 
-Only after that check may the workflow call:
+## Commit 16 — Scope-aware Audit-First Wave 2
 
-    Deploy-PolicyPlan
-    Deploy-RolesPlan
+The active cumulative profile is:
 
-After deployment the workflow rebuilds the EPAC plan and requires zero
-remaining policy and role changes.
+    foundation/policy/profiles/enterprise/audit-first-wave2.json
 
-This is deliberately narrower than the future steady-state apply capability.
-DINE/Modify policies and role reconciliation are not enabled by Commit 15.
+Wave 2 keeps the four Wave 1 assignment payloads unchanged and adds four more
+built-in, identity-free controls:
+
+    Audit-ResourceRGLocation -> root
+    Audit-AppGW-WAF           -> landing_zones
+    Deny-Priv-Esc-AKS         -> landing_zones
+    Deny-Privileged-AKS       -> landing_zones
+
+`Audit-AppGW-WAF` was duplicated in the legacy Landing Zones and Online
+archetypes. APF assigns it once at Landing Zones because Online is a child and
+inherits the assignment. The migration rationale is recorded in the profile.
+
+Desired state remains:
+
+    desiredState.strategy = ownedOnly
+
+The protected apply boundary remains additive Policy Assignments only. DINE,
+Modify, assignment identities, role reconciliation, custom definitions/sets,
+sovereignty controls and REVIEW-classified migration assets remain deferred.
