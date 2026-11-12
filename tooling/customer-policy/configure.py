@@ -555,7 +555,20 @@ jobs:
             -PacEnvironmentSelector $env:PAC_SELECTOR `
             -OutputFolder "${{{{ github.workspace }}}}/governance/policy/Output"
 
+      - name: Detect EPAC plan output
+        id: plan-output
+        shell: bash
+        run: |
+          if find governance/policy/Output -type f -print -quit 2>/dev/null | grep -q .; then
+            echo "has_plan=true" >> "$GITHUB_OUTPUT"
+            echo "[PASS] EPAC deployment plan artifact detected."
+          else
+            echo "has_plan=false" >> "$GITHUB_OUTPUT"
+            echo "[PASS] EPAC desired state is converged; no deployment plan artifact was produced."
+          fi
+
       - name: Upload EPAC plan
+        if: steps.plan-output.outputs.has_plan == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: epac-policy-plan-${{{{ github.event.pull_request.number }}}}

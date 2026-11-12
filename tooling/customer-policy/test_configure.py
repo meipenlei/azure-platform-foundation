@@ -221,6 +221,14 @@ class ConfigureTests(unittest.TestCase):
             self.assertNotIn("Deploy-PolicyPlan", plan)
             self.assertNotIn("Deploy-RolesPlan", plan)
             self.assertIn("policy-apply.yml", plan)
+            self.assertIn("id: plan-output", plan)
+            self.assertIn('echo "has_plan=true" >> "$GITHUB_OUTPUT"', plan)
+            self.assertIn('echo "has_plan=false" >> "$GITHUB_OUTPUT"', plan)
+            self.assertIn(
+                "if: steps.plan-output.outputs.has_plan == 'true'",
+                plan,
+            )
+            self.assertIn("if-no-files-found: error", plan)
 
             self.assertIn("workflow_dispatch", apply)
             self.assertIn("AZURE_GOVERNANCE_CLIENT_ID", apply)
