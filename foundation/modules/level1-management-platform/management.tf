@@ -13,9 +13,9 @@ resource "azurerm_log_analytics_workspace" "platform" {
   retention_in_days = var.log_analytics_retention_days
 
   allow_resource_only_permissions = true
-  local_authentication_enabled     = false
-  internet_ingestion_enabled       = true
-  internet_query_enabled           = true
+  local_authentication_enabled    = false
+  internet_ingestion_enabled      = true
+  internet_query_enabled          = true
 
   tags = local.tags
 }
