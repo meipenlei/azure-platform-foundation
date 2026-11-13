@@ -8,6 +8,13 @@ variable "bootstrap_subscription_id" {
   type        = string
 }
 
+variable "management_subscription_id" {
+  description = "Optional dedicated Management platform subscription. When null, the bootstrap subscription is used for management resources."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "name_prefix" {
   description = "Stable APF management-group root ID and prefix."
   type        = string

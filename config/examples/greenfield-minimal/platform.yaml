@@ -19,3 +19,8 @@ naming:
 security:
   authentication: "workload-identity-federation"
   allow_long_lived_credentials: false
+
+management:
+  monitoring:
+    log_analytics:
+      retention_days: 30

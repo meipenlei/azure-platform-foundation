@@ -25,6 +25,13 @@ output "bootstrap_subscription_parent_management_group_id" {
   value = azurerm_management_group.management.id
 }
 
+output "management_subscription_id" {
+  value = coalesce(
+    var.management_subscription_id,
+    var.bootstrap_subscription_id,
+  )
+}
+
 output "policy_deployment_root_scope" {
   value = azurerm_management_group.root.id
 }

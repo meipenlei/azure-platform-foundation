@@ -15,6 +15,7 @@ TERRAFORM_VERSION = "1.17.1"
 TERRAFORM_REQUIRED_VERSION = "~> 1.17"
 AZURERM_VERSION = "4.81.0"
 STATE_KEY = "level1.management-groups.tfstate"
+MODULE_CONTRACT = "commit18"
 
 
 class ConfigureError(RuntimeError):
@@ -48,7 +49,9 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def require_project(project_dir: Path) -> tuple[dict, dict, dict, dict]:
+def require_project(
+    project_dir: Path,
+) -> tuple[dict, dict, dict, dict]:
     paths = {
         "foundation": project_dir / "config/foundation.yaml",
         "customer": project_dir / "config/customer.yaml",
@@ -69,6 +72,19 @@ def require_project(project_dir: Path) -> tuple[dict, dict, dict, dict]:
     )
 
 
+def management_subscription_id(customer: dict[str, Any]) -> str:
+    azure = customer.get("azure") or {}
+    value = (
+        azure.get("management_subscription_id")
+        or azure.get("bootstrap_subscription_id")
+    )
+    if not value:
+        raise ConfigureError(
+            "Azure management/bootstrap subscription ID is required."
+        )
+    return str(value)
+
+
 def validate_inputs(
     foundation: dict[str, Any],
     customer: dict[str, Any],
@@ -78,7 +94,7 @@ def validate_inputs(
     try:
         if platform["execution"]["provider"] != "github":
             raise ConfigureError(
-                "Commit 12 Level 1 generation supports GitHub execution only."
+                "Level 1 generation supports GitHub execution only."
             )
 
         if bootstrap["azure"]["tenant_id"] != customer["azure"]["tenant_id"]:
@@ -107,6 +123,8 @@ def validate_inputs(
 
         if not foundation["foundation"]["version"]:
             raise ConfigureError("foundation.version is required.")
+
+        management_subscription_id(customer)
 
     except KeyError as exc:
         raise ConfigureError(
@@ -155,6 +173,11 @@ variable "subscription_id" {
   type        = string
 }
 
+variable "management_subscription_id" {
+  description = "APF Management platform subscription ID."
+  type        = string
+}
+
 variable "name_prefix" {
   description = "APF management-group root ID and prefix."
   type        = string
@@ -173,7 +196,9 @@ variable "bootstrap_resource_group_name" {
 
 
 def render_main(foundation_ref: str) -> str:
-    return f'''data "azurerm_user_assigned_identity" "plan" {{
+    return f'''# APF module contract: {MODULE_CONTRACT}
+
+data "azurerm_user_assigned_identity" "plan" {{
   name                = "${{var.name_prefix}}-id-l0-plan"
   resource_group_name = var.bootstrap_resource_group_name
 }}
@@ -186,12 +211,13 @@ data "azurerm_user_assigned_identity" "governance" {{
 module "management_groups" {{
   source = "git::https://github.com/meipenlei/azure-platform-foundation.git//foundation/modules/level1-management-groups?ref={foundation_ref}"
 
-  tenant_id                 = var.tenant_id
-  bootstrap_subscription_id = var.subscription_id
-  name_prefix               = var.name_prefix
-  root_display_name         = var.root_display_name
-  plan_principal_id         = data.azurerm_user_assigned_identity.plan.principal_id
-  governance_principal_id   = data.azurerm_user_assigned_identity.governance.principal_id
+  tenant_id                  = var.tenant_id
+  bootstrap_subscription_id  = var.subscription_id
+  management_subscription_id = var.management_subscription_id
+  name_prefix                = var.name_prefix
+  root_display_name          = var.root_display_name
+  plan_principal_id          = data.azurerm_user_assigned_identity.plan.principal_id
+  governance_principal_id    = data.azurerm_user_assigned_identity.governance.principal_id
 }}
 '''
 
@@ -211,6 +237,10 @@ output "management_group_ids" {
 
 output "bootstrap_subscription_parent_management_group_id" {
   value = module.management_groups.bootstrap_subscription_parent_management_group_id
+}
+
+output "management_subscription_id" {
+  value = module.management_groups.management_subscription_id
 }
 
 output "policy_deployment_root_scope" {
@@ -268,8 +298,11 @@ def render_tfvars(
     values = {
         "tenant_id": customer["azure"]["tenant_id"],
         "subscription_id": customer["azure"]["bootstrap_subscription_id"],
+        "management_subscription_id": management_subscription_id(customer),
         "name_prefix": platform["naming"]["prefix"],
-        "root_display_name": f"{customer['customer']['display_name']} Platform",
+        "root_display_name": (
+            f"{customer['customer']['display_name']} Platform"
+        ),
         "bootstrap_resource_group_name": bootstrap["bootstrap"][
             "resource_group_name"
         ],
@@ -511,7 +544,9 @@ def main() -> int:
     print()
 
     try:
-        foundation, customer, platform, bootstrap = require_project(project_dir)
+        foundation, customer, platform, bootstrap = require_project(
+            project_dir
+        )
         validate_inputs(
             foundation=foundation,
             customer=customer,
@@ -529,7 +564,9 @@ def main() -> int:
         changes = changed_files(files)
 
         if not changes:
-            print("[PASS] Level 1 management-group project is already generated.")
+            print(
+                "[PASS] Level 1 management-group project is already generated."
+            )
             return 0
 
         print("Planned generated-file changes:")

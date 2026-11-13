@@ -59,6 +59,11 @@
           "format": "uuid",
           "description": "Azure subscription used to establish Level 0."
         },
+        "management_subscription_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Optional dedicated Management platform subscription. When omitted, APF uses the bootstrap subscription for Level 1 management resources."
+        },
         "cloud": {
           "type": "string",
           "enum": [
