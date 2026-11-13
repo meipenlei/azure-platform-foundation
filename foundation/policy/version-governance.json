@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1",
+  "strategy": "pinned_major",
+  "active_profile": "foundation/policy/profiles/enterprise/audit-first-wave2.json",
+  "definition_version_pattern": "major_wildcard",
+  "rules": {
+    "built_in_major_upgrade": "explicit_review_required",
+    "minor_updates_within_pinned_major": "auto_ingest",
+    "patch_updates": "auto_ingest",
+    "preview_versions": "explicit_pin_and_review",
+    "missing_definition_version": "reject"
+  },
+  "review_records": [
+    "foundation/policy/reviews/1c6e92c9-99f0-4e55-9cf2-0c234dc48f99-7-to-8.json"
+  ]
+}

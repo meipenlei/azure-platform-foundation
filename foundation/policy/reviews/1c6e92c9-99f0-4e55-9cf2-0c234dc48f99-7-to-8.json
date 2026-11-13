@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "policy_definition_id": "/providers/Microsoft.Authorization/policyDefinitions/1c6e92c9-99f0-4e55-9cf2-0c234dc48f99",
+  "display_name": "Kubernetes clusters should not allow container privilege escalation",
+  "assignment_keys": [
+    "deny_priv_esc_aks"
+  ],
+  "current_pin": "7.*.*",
+  "current_effective_major": 7,
+  "observed_latest": "8.0.0",
+  "observed_latest_major": 8,
+  "observed_at": "2026-11-13",
+  "status": "hold",
+  "decision": "keep_current_major",
+  "rationale": "Keep 7.*.* until v8 behavior is explicitly tested. The APF effect=Deny remains valid, but v8 changes the Gatekeeper template and introduces a new behavior parameter.",
+  "change_summary": [
+    "Adds Boolean parameter forcePrivilegeEscalationToBeFalse with default false.",
+    "Changes the public Gatekeeper template reference from v3 to v4.",
+    "Removes lowercase effect aliases; canonical Audit, Deny and Disabled remain.",
+    "Keeps the same built-in policy definition ID."
+  ],
+  "upstream_alignment": {
+    "library": "Azure/Azure-Landing-Zones-Library",
+    "alz_tag": "platform/alz/2026.11.0",
+    "assignment": "Deny-Priv-Esc-AKS",
+    "definition_version": "7.*.*"
+  }
+}

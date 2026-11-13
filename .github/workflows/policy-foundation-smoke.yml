@@ -13,6 +13,7 @@ on:
       - "docs/architecture/policy-plan-pilot.md"
       - "docs/architecture/policy-audit-first-wave1.md"
       - "docs/architecture/policy-protected-apply.md"
+      - "docs/architecture/policy-version-governance.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -26,6 +27,7 @@ on:
       - "docs/architecture/policy-plan-pilot.md"
       - "docs/architecture/policy-audit-first-wave1.md"
       - "docs/architecture/policy-protected-apply.md"
+      - "docs/architecture/policy-version-governance.md"
       - "docs/migration/**"
       - ".github/workflows/policy-foundation-smoke.yml"
 
@@ -58,8 +60,10 @@ jobs:
             tooling/policy/migrate_legacy.py \
             tooling/policy/prepare_upstream.py \
             tooling/policy/validate.py \
+            tooling/policy/validate_versions.py \
             tooling/policy/test_inventory.py \
             tooling/policy/test_migrate_legacy.py \
+            tooling/policy/test_validate_versions.py \
             tooling/customer-policy/configure.py \
             tooling/customer-policy/verify_apply_plan.py \
             tooling/customer-policy/test_configure.py \
@@ -78,6 +82,7 @@ jobs:
       - name: Validate APF policy foundation
         run: |
           python tooling/policy/validate.py
+          python tooling/policy/validate_versions.py
 
       - name: Validate PowerShell version and EPAC module
         shell: pwsh

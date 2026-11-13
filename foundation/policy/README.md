@@ -109,3 +109,7 @@ Desired state remains:
 The protected apply boundary remains additive Policy Assignments only. DINE,
 Modify, assignment identities, role reconciliation, custom definitions/sets,
 sovereignty controls and REVIEW-classified migration assets remain deferred.
+## Commit 17 — Policy Version Governance
+
+APF treats Azure Policy definition versions as part of policy intent. The machine-readable contract is `foundation/policy/version-governance.json`. The default strategy is `pinned_major`: built-in assignments use `#.*.*`, auto-ingesting minor/patch changes inside a major while requiring explicit review for a new major. Commit 17 records the first review for the AKS privilege-escalation policy and keeps `7.*.*`; it performs no customer or Azure mutation.
+
